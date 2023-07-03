@@ -1,0 +1,18 @@
+include MANIFEST.in
+include requirements.txt
+include *.json
+include *.md
+include *.py
+include *.txt
+recursive-include easebuzz *.css
+recursive-include easebuzz *.csv
+recursive-include easebuzz *.html
+recursive-include easebuzz *.ico
+recursive-include easebuzz *.js
+recursive-include easebuzz *.json
+recursive-include easebuzz *.md
+recursive-include easebuzz *.png
+recursive-include easebuzz *.py
+recursive-include easebuzz *.svg
+recursive-include easebuzz *.txt
+recursive-exclude easebuzz *.pyc
