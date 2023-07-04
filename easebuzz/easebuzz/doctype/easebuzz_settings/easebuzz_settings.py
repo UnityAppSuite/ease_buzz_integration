@@ -4,7 +4,7 @@
 import uuid
 import frappe
 from frappe.model.document import Document
-from edu_quality.easebuzz.utils.easebuzz_payment_gateway import Easebuzz
+from easebuzz.easebuzz.utils.easebuzz_payment_gateway import Easebuzz
 from frappe.utils import call_hook_method
 from frappe.utils.data import cint
 from payments.utils.utils import create_payment_gateway
