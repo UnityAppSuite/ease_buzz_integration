@@ -55,8 +55,8 @@ class EaseBuzzSettings(Document):
             "state": student.state,
             "address1": student.address_line_2,
             "country": student.country,
-            "udf1": f"{fee_doctype}",
-            "udf2": f"{fee_docname}",
+            "udf1": f"{doctype}",  # Payment Request Doctype
+            "udf2": f"{docname}",  # Payment Request Docname
             "udf3": "",
             "udf4": "",
             "udf5": "",
@@ -81,6 +81,21 @@ class EaseBuzzSettings(Document):
             )
 
         return settings
+
+    def handle_response(self, data):
+        payment_request_doctype = data.get("udf1")
+        payment_request_docname = data.get("udf2")
+        status = data.get("status")
+        if status == "success":
+            if frappe.db.exists(payment_request_doctype, payment_request_docname):
+                frappe.msgprint("Payment Request exists")
+                payment_request = frappe.get_doc(
+                    payment_request_doctype, payment_request_docname
+                )
+                payment_request.on_payment_authorized(status="Completed")
+                return {"message": "Payment Successful"}
+            else:
+                frappe.msgprint("Payment Request does not exist, Invalid Request")
 
 
 @frappe.whitelist(allow_guest=True)
