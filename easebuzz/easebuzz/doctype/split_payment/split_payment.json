@@ -7,7 +7,8 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "easebuzz_accounts"
+  "easebuzz_accounts",
+  "default_account"
  ],
  "fields": [
   {
@@ -15,12 +16,18 @@
    "fieldtype": "Table",
    "label": "Easebuzz Accounts",
    "options": "Accounts"
+  },
+  {
+   "fieldname": "default_account",
+   "fieldtype": "Link",
+   "label": "Default Account",
+   "options": "Bank Account"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2023-07-11 09:52:11.733060",
+ "modified": "2023-07-11 17:12:07.649720",
  "modified_by": "Administrator",
  "module": "Easebuzz",
  "name": "Split Payment",
