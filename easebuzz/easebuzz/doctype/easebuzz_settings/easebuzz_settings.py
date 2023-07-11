@@ -40,12 +40,14 @@ class EaseBuzzSettings(Document):
         student = frappe.get_doc("Student", fees.student)
         self.init_client()
         site_url = frappe.utils.get_url()
+        amounts = float(kwargs.get("amount"))
+        split_payments = get_split_payment(fees)
         postDict = {
             "txnid": f"{str(uuid.uuid4())[:8]}",
-            "firstname": f"{kwargs.get('payer_name')}",
+            "firstname": student.first_name,
             "phone": student.student_mobile_number,
             "email": f"{kwargs.get('payer_email')}",
-            "amount": f"{kwargs.get('amount')}",
+            "amount": f"{amounts}",
             "productinfo": payment_request.subject,
             "surl": f"{site_url}/easebuzz/success",
             "furl": f"{site_url}/easebuzz/failure",
@@ -55,6 +57,7 @@ class EaseBuzzSettings(Document):
             "state": student.state,
             "address1": student.address_line_2,
             "country": student.country,
+            "split_payments": split_payments,
             "udf1": f"{doctype}",  # Payment Request Doctype
             "udf2": f"{docname}",  # Payment Request Docname
             "udf3": "",
@@ -63,6 +66,8 @@ class EaseBuzzSettings(Document):
         }
         url = self.client.initiatePaymentAPI(postDict)
         return url
+
+    # every fee type is linked with a bank account and the split of amount should go that way
 
     def get_settings(self, data):
         settings = frappe._dict(
@@ -102,3 +107,24 @@ class EaseBuzzSettings(Document):
 def get_merchant_key():
     controller = frappe.get_doc("EaseBuzz Settings")
     return controller.merchant_key
+
+
+def get_split_payment(doc):
+    fee = {i.fees_category: i.amount for i in doc.components}
+    sp = frappe.get_single("Split Payment")
+    accounts = {
+        i.fee_category: i.account_name.split()[0]
+        for i in sp.easebuzz_accounts
+    }
+    remaining_amount = 0
+    split_payment = dict()
+    for i in fee.keys():
+        account_name = accounts.get(i)
+        if account_name is not None:
+            split_payment[account_name] = fee[i]
+        else:
+            remaining_amount += fee[i]
+
+    default_account = sp.default_account.split()[0]
+    split_payment[default_account] += remaining_amount
+    return split_payment

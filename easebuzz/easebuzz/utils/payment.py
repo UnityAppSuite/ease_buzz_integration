@@ -195,7 +195,7 @@ def _checkArgumentValidation(*arg):
 *
 '''
 def _removeSpaceAndPreparePostArray(params):
-
+    split_payments = params.get('split_payments')
     temp_distionary = {
       'key' : params['key'].strip(),
       'txnid' : params['txnid'].strip(),
@@ -216,7 +216,8 @@ def _removeSpaceAndPreparePostArray(params):
       'city' : params['city'].strip(),
       'state' : params['state'].strip(),
       'country' : params['country'].strip(),
-      'zipcode' : params['zipcode'].strip()
+      'zipcode' : params['zipcode'].strip(),
+      'split_payments': json.dumps(split_payments).strip() if split_payments is not None else "",
     }
     return temp_distionary
 
@@ -476,7 +477,6 @@ def _pay(params_array, salt_key, url):
 
     # requests call for initiate pay link
     request_result = requests.post(url + 'payment/initiateLink', params_array)
-
     result = json.loads(request_result.content)
 
     if result['status'] == 1:
