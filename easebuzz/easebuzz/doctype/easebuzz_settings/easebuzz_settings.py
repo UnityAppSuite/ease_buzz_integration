@@ -110,21 +110,27 @@ def get_merchant_key():
 
 
 def get_split_payment(doc):
-    fee = {i.fees_category: i.amount for i in doc.components}
-    sp = frappe.get_single("Split Payment")
-    accounts = {
-        i.fee_category: i.account_name.split()[0]
-        for i in sp.easebuzz_accounts
-    }
-    remaining_amount = 0
-    split_payment = dict()
-    for i in fee.keys():
-        account_name = accounts.get(i)
-        if account_name is not None:
-            split_payment[account_name] = fee[i]
-        else:
-            remaining_amount += fee[i]
+    try:
+        fee = {i.fees_category: i.amount for i in doc.components}
+        sp = frappe.get_single("Split Payment")
+        accounts = {
+            i.fee_category: i.account_name.split()[0]
+            for i in sp.easebuzz_accounts
+        }
+        remaining_amount = 0
+        split_payment = dict()
+        for i in fee.keys():
+            account_name = accounts.get(i)
+            if account_name is not None:
+                split_payment[account_name] = fee[i]
+            else:
+                remaining_amount += fee[i]
 
-    default_account = sp.default_account.split()[0]
-    split_payment[default_account] += remaining_amount
-    return split_payment
+        default_account = sp.default_account.split()[0]
+        if split_payment.get(default_account) is not None:
+            split_payment[default_account] += remaining_amount
+        else:
+            split_payment[default_account] = remaining_amount
+        return split_payment
+    except Exception as e:
+        frappe.log_error(e)
