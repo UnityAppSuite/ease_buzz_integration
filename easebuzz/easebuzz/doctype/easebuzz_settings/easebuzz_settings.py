@@ -114,7 +114,7 @@ def get_split_payment(doc):
         fee = {i.fees_category: i.amount for i in doc.components}
         sp = frappe.get_single("Split Payment")
         accounts = {
-            i.fee_category: i.account_name.split()[0]
+            i.fee_category: i.label.split()[0]
             for i in sp.easebuzz_accounts
         }
         remaining_amount = 0

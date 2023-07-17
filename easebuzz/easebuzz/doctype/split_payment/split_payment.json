@@ -21,13 +21,13 @@
    "fieldname": "default_account",
    "fieldtype": "Link",
    "label": "Default Account",
-   "options": "Bank Account"
+   "options": "Account"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2023-07-11 17:12:07.649720",
+ "modified": "2023-07-13 12:02:51.635419",
  "modified_by": "Administrator",
  "module": "Easebuzz",
  "name": "Split Payment",

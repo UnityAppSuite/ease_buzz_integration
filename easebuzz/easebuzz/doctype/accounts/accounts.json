@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "account_name",
+  "label",
   "fee_category"
  ],
  "fields": [
@@ -14,19 +15,25 @@
    "fieldname": "account_name",
    "fieldtype": "Link",
    "label": "Account Name",
-   "options": "Bank Account"
+   "options": "Account"
   },
   {
    "fieldname": "fee_category",
    "fieldtype": "Link",
    "label": "Fee Category",
    "options": "Fee Category"
+  },
+  {
+   "fieldname": "label",
+   "fieldtype": "Link",
+   "label": "Label",
+   "options": "Bank Account"
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2023-07-11 09:51:42.128005",
+ "modified": "2023-07-13 12:04:32.330042",
  "modified_by": "Administrator",
  "module": "Easebuzz",
  "name": "Accounts",
