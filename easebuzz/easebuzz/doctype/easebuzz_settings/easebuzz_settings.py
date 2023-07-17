@@ -41,15 +41,20 @@ class EaseBuzzSettings(Document):
         self.init_client()
         site_url = frappe.utils.get_url()
         amounts = float(kwargs.get("amount"))
+        payment_method = kwargs.get("payment_method")
+        show_payment_mode = get_payment_mode(payment_method)
+        charge = frappe.db.get_value(
+            "Payment Methods", {"method": payment_method}, "charge"
+        )
+        total_amount = get_total_amount(amounts, charge)
         split_payments = get_split_payment(fees)
-        payment_mode = kwargs.get("payment_mode")
-        show_payment_mode = get_payment_mode(payment_mode)
+        split_payments = get_split_payment_with_charge(split_payments, amounts, charge)
         postDict = {
             "txnid": f"{str(uuid.uuid4())[:8]}",
             "firstname": student.first_name,
             "phone": student.student_mobile_number,
             "email": f"{kwargs.get('payer_email')}",
-            "amount": f"{amounts}",
+            "amount": f"{total_amount}",
             "productinfo": payment_request.subject,
             "surl": f"{site_url}/easebuzz/success",
             "furl": f"{site_url}/easebuzz/failure",
@@ -145,3 +150,25 @@ def get_payment_mode(method):
         "UPI": "UPI",
     }
     return payment_methods.get(method)
+
+
+def get_total_amount(amount, charge):
+    if amount is None:
+        return 0
+
+    if charge is None:
+        return amount
+
+    charge_amount = (amount * float(charge)) / 100
+    total_amount = amount + charge_amount
+    return total_amount
+
+def get_split_payment_with_charge(split_payment, amount, charge):
+    charge_amount = (amount * float(charge)) / 100
+    sp = frappe.get_single("Split Payment")
+    default_account = sp.default_account.split()[0]
+    if split_payment.get(default_account) is not None:
+        split_payment[default_account] += charge_amount
+    else:
+        split_payment[default_account] = charge_amount
+    return split_payment

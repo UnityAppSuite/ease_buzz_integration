@@ -218,6 +218,7 @@ def _removeSpaceAndPreparePostArray(params):
       'country' : params['country'].strip(),
       'zipcode' : params['zipcode'].strip(),
       'split_payments': json.dumps(split_payments).strip() if split_payments is not None else "",
+      'show_payment_mode': params['show_payment_mode'].strip()
     }
     return temp_distionary
 
@@ -478,7 +479,7 @@ def _pay(params_array, salt_key, url):
     # requests call for initiate pay link
     request_result = requests.post(url + 'payment/initiateLink', params_array)
     result = json.loads(request_result.content)
-
+    print(params_array)
     if result['status'] == 1:
         accesskey = result['data']
     else:
