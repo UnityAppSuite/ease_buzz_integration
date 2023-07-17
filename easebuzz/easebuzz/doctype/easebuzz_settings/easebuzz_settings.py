@@ -42,6 +42,8 @@ class EaseBuzzSettings(Document):
         site_url = frappe.utils.get_url()
         amounts = float(kwargs.get("amount"))
         split_payments = get_split_payment(fees)
+        payment_mode = kwargs.get("payment_mode")
+        show_payment_mode = get_payment_mode(payment_mode)
         postDict = {
             "txnid": f"{str(uuid.uuid4())[:8]}",
             "firstname": student.first_name,
@@ -58,6 +60,7 @@ class EaseBuzzSettings(Document):
             "address1": student.address_line_2,
             "country": student.country,
             "split_payments": split_payments,
+            "show_payment_mode": show_payment_mode,
             "udf1": f"{doctype}",  # Payment Request Doctype
             "udf2": f"{docname}",  # Payment Request Docname
             "udf3": "",
@@ -113,10 +116,7 @@ def get_split_payment(doc):
     try:
         fee = {i.fees_category: i.amount for i in doc.components}
         sp = frappe.get_single("Split Payment")
-        accounts = {
-            i.fee_category: i.label.split()[0]
-            for i in sp.easebuzz_accounts
-        }
+        accounts = {i.fee_category: i.label.split()[0] for i in sp.easebuzz_accounts}
         remaining_amount = 0
         split_payment = dict()
         for i in fee.keys():
@@ -134,3 +134,14 @@ def get_split_payment(doc):
         return split_payment
     except Exception as e:
         frappe.log_error(e)
+
+
+def get_payment_mode(method):
+    payment_methods = {
+        "Net Banking": "NB",
+        "Credit Card": "CC",
+        "Debit card": "DC",
+        "Mobile Wallet": "MW",
+        "UPI": "UPI",
+    }
+    return payment_methods.get(method)
