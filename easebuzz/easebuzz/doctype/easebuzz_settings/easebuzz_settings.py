@@ -41,8 +41,10 @@ class EaseBuzzSettings(Document):
         self.init_client()
         site_url = frappe.utils.get_url()
         amounts = float(kwargs.get("amount"))
-        payment_method = kwargs.get("payment_method")
-        show_payment_mode = get_payment_mode(payment_method)
+        payment_method = str(kwargs.get("payment_method"))
+        show_payment_mode = (
+            get_payment_mode(payment_method) if get_payment_mode(payment_method) else ""
+        )
         charge = frappe.db.get_value(
             "Payment Methods", {"method": payment_method}, "charge"
         )
@@ -143,13 +145,13 @@ def get_split_payment(doc):
 
 def get_payment_mode(method):
     payment_methods = {
-        "Net Banking": "NB",
-        "Credit Card": "CC",
-        "Debit card": "DC",
-        "Mobile Wallet": "MW",
-        "UPI": "UPI",
+        "net banking": "NB",
+        "credit card": "CC",
+        "debit card": "DC",
+        "mobile wallet": "MW",
+        "upi": "UPI",
     }
-    return payment_methods.get(method)
+    return payment_methods.get(method.lower())
 
 
 def get_total_amount(amount, charge):
