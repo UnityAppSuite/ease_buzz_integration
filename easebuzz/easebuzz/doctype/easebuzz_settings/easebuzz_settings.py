@@ -41,16 +41,26 @@ class EaseBuzzSettings(Document):
         self.init_client()
         site_url = frappe.utils.get_url()
         amounts = float(kwargs.get("amount"))
+
         payment_method = str(kwargs.get("payment_method"))
         show_payment_mode = (
             get_payment_mode(payment_method) if get_payment_mode(payment_method) else ""
         )
-        charge = frappe.db.get_value(
-            "Payment Methods", {"method": payment_method}, "charge"
-        )
-        total_amount = get_total_amount(amounts, charge)
         split_payments = get_split_payment(fees)
-        split_payments = get_split_payment_with_charge(split_payments, amounts, charge)
+
+        if get_surchage() == 1:
+            charge = frappe.db.get_value(
+                "Payment Methods", {"method": payment_method}, "charge"
+            )
+            total_amount = get_total_amount(amounts, charge)
+            split_payments = get_split_payment_with_charge(
+                split_payments, amounts, charge
+            )
+            surcharge = "enabled"
+        else:
+            total_amount = amounts
+            surcharge = "disabled"
+
         postDict = {
             "txnid": f"{str(uuid.uuid4())[:8]}",
             "firstname": student.first_name,
@@ -68,6 +78,7 @@ class EaseBuzzSettings(Document):
             "country": student.country,
             "split_payments": split_payments,
             "show_payment_mode": show_payment_mode,
+            "surcharge": surcharge,
             "udf1": f"{doctype}",  # Payment Request Doctype
             "udf2": f"{docname}",  # Payment Request Docname
             "udf3": "",
@@ -165,7 +176,11 @@ def get_total_amount(amount, charge):
     total_amount = amount + charge_amount
     return total_amount
 
+
 def get_split_payment_with_charge(split_payment, amount, charge):
+    if charge is None:
+        return split_payment
+
     charge_amount = (amount * float(charge)) / 100
     sp = frappe.get_single("Split Payment")
     default_account = sp.default_account.split()[0]
@@ -174,3 +189,8 @@ def get_split_payment_with_charge(split_payment, amount, charge):
     else:
         split_payment[default_account] = charge_amount
     return split_payment
+
+
+def get_surchage():
+    fee_setting = frappe.get_single("Fees Settings")
+    return fee_setting.surcharge

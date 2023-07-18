@@ -196,7 +196,7 @@ def _checkArgumentValidation(*arg):
 '''
 def _removeSpaceAndPreparePostArray(params):
     split_payments = params.get('split_payments')
-    temp_distionary = {
+    temp_dictionary = {
       'key' : params['key'].strip(),
       'txnid' : params['txnid'].strip(),
       'amount' : params['amount'].strip(),
@@ -218,9 +218,10 @@ def _removeSpaceAndPreparePostArray(params):
       'country' : params['country'].strip(),
       'zipcode' : params['zipcode'].strip(),
       'split_payments': json.dumps(split_payments).strip() if split_payments is not None else "",
-      'show_payment_mode': params['show_payment_mode'].strip()
+      'show_payment_mode': params['show_payment_mode'].strip(),
+      'surcharge': params['surcharge'].strip(),
     }
-    return temp_distionary
+    return temp_dictionary
 
 
 '''
