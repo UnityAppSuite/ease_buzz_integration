@@ -1,7 +1,6 @@
 # Copyright (c) 2023, Hybrowlabs and contributors
 # For license information, please see license.txt
 
-import uuid
 import frappe
 from frappe.model.document import Document
 from easebuzz.easebuzz.utils.easebuzz_payment_gateway import Easebuzz
@@ -54,15 +53,15 @@ class EaseBuzzSettings(Document):
             )
             total_amount = get_total_amount(amounts, charge)
             split_payments = get_split_payment_with_charge(
-                split_payments, amounts, charge
+                fees, split_payments, amounts, charge
             )
             surcharge = "enabled"
         else:
             total_amount = amounts
             surcharge = "disabled"
-
+        transaction_id = frappe.generate_hash(length=40)
         postDict = {
-            "txnid": f"{str(uuid.uuid4())[:8]}",
+            "txnid": transaction_id,
             "firstname": student.first_name,
             "phone": student.student_mobile_number,
             "email": f"{kwargs.get('payer_email')}",
@@ -72,9 +71,9 @@ class EaseBuzzSettings(Document):
             "furl": f"{site_url}/easebuzz/failure",
             "city": student.city,
             "zipcode": student.pincode,
+            "address1": student.address_line_1,
             "address2": student.address_line_2,
             "state": student.state,
-            "address1": student.address_line_2,
             "country": student.country,
             "split_payments": split_payments,
             "show_payment_mode": show_payment_mode,
@@ -87,8 +86,6 @@ class EaseBuzzSettings(Document):
         }
         url = self.client.initiatePaymentAPI(postDict)
         return url
-
-    # every fee type is linked with a bank account and the split of amount should go that way
 
     def get_settings(self, data):
         settings = frappe._dict(
@@ -112,11 +109,20 @@ class EaseBuzzSettings(Document):
         payment_request_doctype = data.get("udf1")
         payment_request_docname = data.get("udf2")
         status = data.get("status")
+        transaction_id = data.get("txnid")
         if status == "success":
             if frappe.db.exists(payment_request_doctype, payment_request_docname):
                 frappe.msgprint("Payment Request exists")
                 payment_request = frappe.get_doc(
-                    payment_request_doctype, payment_request_docname, ignore_permissions=True
+                    payment_request_doctype,
+                    payment_request_docname,
+                    ignore_permissions=True,
+                )
+                frappe.db.set_value(
+                    payment_request_doctype,
+                    payment_request_docname,
+                    "transaction_id",
+                    transaction_id,
                 )
                 payment_request.on_payment_authorized(status="Completed")
                 return {"message": "Payment Successful"}
@@ -132,26 +138,33 @@ def get_merchant_key():
 
 def get_split_payment(doc):
     try:
-        fee = {i.fees_category: i.amount for i in doc.components}
-        sp = frappe.get_single("Split Payment")
-        accounts = {i.fee_category: i.label.split()[0] for i in sp.easebuzz_accounts}
-        remaining_amount = 0
         split_payment = dict()
-        for i in fee.keys():
-            account_name = accounts.get(i)
-            if account_name is not None:
-                split_payment[account_name] = fee[i]
-            else:
-                remaining_amount += fee[i]
+        remaining_amount = 0
+        for component in doc.components:
+            fees_category = component.fees_category
+            label = None
+            try:
+                label = frappe.get_value(
+                    "Split Payment", {"fee_category": fees_category}, "label"
+                )
+                label = label.split()[0]
+                if split_payment.get(label) is not None:
+                    split_payment[label] += component.amount
+                else:
+                    split_payment[label] = component.amount
+            except Exception as e:
+                frappe.logger("easebuzz").exception(e)
 
-        default_account = sp.default_account.split()[0]
+            if label is None:
+                remaining_amount += component.amount
+        default_account = doc.default_account.split()[0]
         if split_payment.get(default_account) is not None:
             split_payment[default_account] += remaining_amount
         else:
             split_payment[default_account] = remaining_amount
         return split_payment
     except Exception as e:
-        frappe.log_error(e)
+        frappe.logger("easebuzz").exception(e)
 
 
 def get_payment_mode(method):
@@ -177,13 +190,12 @@ def get_total_amount(amount, charge):
     return total_amount
 
 
-def get_split_payment_with_charge(split_payment, amount, charge):
+def get_split_payment_with_charge(doc, split_payment, amount, charge):
     if charge is None:
         return split_payment
 
     charge_amount = (amount * float(charge)) / 100
-    sp = frappe.get_single("Split Payment")
-    default_account = sp.default_account.split()[0]
+    default_account = doc.default_account.split()[0]
     if split_payment.get(default_account) is not None:
         split_payment[default_account] += charge_amount
     else:
