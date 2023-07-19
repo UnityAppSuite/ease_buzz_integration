@@ -196,6 +196,13 @@ def _checkArgumentValidation(*arg):
 '''
 def _removeSpaceAndPreparePostArray(params):
     split_payments = params.get('split_payments')
+    address1 = params.get('address1')
+    address2 = params.get('address2')
+    city = params.get('city')
+    state = params.get('state')
+    country = params.get('country')
+    zipcode = params.get('zipcode')
+
     temp_dictionary = {
       'key' : params['key'].strip(),
       'txnid' : params['txnid'].strip(),
@@ -211,18 +218,73 @@ def _removeSpaceAndPreparePostArray(params):
       'productinfo' :params['productinfo'].strip(),
       'surl' : params['surl'].strip(),
       'furl' : params['furl'].strip(),
-      'address1' : params['address1'].strip(),
-      'address2' : params['address2'].strip(),
-      'city' : params['city'].strip(),
-      'state' : params['state'].strip(),
-      'country' : params['country'].strip(),
-      'zipcode' : params['zipcode'].strip(),
+      'address1' : get_address(address1),
+      'address2' : get_address(address2),
+      'city' : get_city(city),
+      'state' : get_state(state),
+      'country' : get_country(country),
+      'zipcode' : get_zipcode(zipcode),
       'split_payments': json.dumps(split_payments).strip() if split_payments is not None else "",
       'show_payment_mode': params['show_payment_mode'].strip(),
       'surcharge': params['surcharge'].strip(),
     }
     return temp_dictionary
 
+
+def get_address(address):
+    if address is None:
+        return ""
+    
+    pattern = r'^[a-zA-Z\.0-9/\\,\s_#-]*$'
+
+    if re.match(pattern, address):
+        return address.strip()
+    else:
+        return ""
+
+def get_city(city):
+    if city is None:
+        return ""
+    
+    pattern = r'^[0-9a-zA-Z_.\s-]*$'
+
+    if re.match(pattern, city):
+        return city.strip()
+    else:
+        return ""
+
+def get_state(state):
+    if state is None:
+        return ""
+    
+    pattern = r'^[0-9a-zA-Z_.\s-]*$'
+
+    if re.match(pattern, state):
+        return state.strip()
+    else:
+        return ""
+    
+def get_country(country):
+    if country is None:
+        return ""
+    
+    pattern = r'^[a-zA-Z_.\s-]*$'
+
+    if re.match(pattern, country):
+        return country.strip()
+    else:
+        return ""
+    
+def get_zipcode(zipcode):
+    if zipcode is None:
+        return ""
+    
+    pattern = r'^[0-9]{0,6}$'
+
+    if re.match(pattern, zipcode):
+        return zipcode.strip()
+    else:
+        return ""
 
 '''
 * _typeValidation method check type validation for field.

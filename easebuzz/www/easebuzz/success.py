@@ -12,5 +12,5 @@ def get_context(context):
             data = frappe.form_dict
             frappe.get_doc("EaseBuzz Settings").handle_response(data)
     except Exception as e:
-        frappe.logger("test").exception(e)
+        frappe.logger("easebuzz").exception(e)
             
