@@ -116,7 +116,7 @@ class EaseBuzzSettings(Document):
             if frappe.db.exists(payment_request_doctype, payment_request_docname):
                 frappe.msgprint("Payment Request exists")
                 payment_request = frappe.get_doc(
-                    payment_request_doctype, payment_request_docname
+                    payment_request_doctype, payment_request_docname, ignore_permissions=True
                 )
                 payment_request.on_payment_authorized(status="Completed")
                 return {"message": "Payment Successful"}
