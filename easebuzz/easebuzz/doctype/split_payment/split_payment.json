@@ -34,6 +34,7 @@
    "options": "Bank Account"
   },
   {
+   "fetch_from": "account.company",
    "fieldname": "company",
    "fieldtype": "Link",
    "label": "Company",
@@ -42,7 +43,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2023-07-19 17:02:59.472267",
+ "modified": "2023-07-20 11:33:49.294956",
  "modified_by": "Administrator",
  "module": "Easebuzz",
  "name": "Split Payment",
