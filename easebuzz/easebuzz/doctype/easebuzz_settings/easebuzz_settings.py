@@ -157,7 +157,8 @@ def get_split_payment(doc):
 
             if label is None:
                 remaining_amount += component.amount
-        default_account = doc.default_account.split()[0]
+        fees_settings = frappe.get_single("Fees Settings")
+        default_account = fees_settings.default_account.split()[0]
         if split_payment.get(default_account) is not None:
             split_payment[default_account] += remaining_amount
         else:
@@ -195,6 +196,7 @@ def get_split_payment_with_charge(doc, split_payment, amount, charge):
         return split_payment
 
     charge_amount = (amount * float(charge)) / 100
+    doc = frappe.get_single("Fees Settings")
     default_account = doc.default_account.split()[0]
     if split_payment.get(default_account) is not None:
         split_payment[default_account] += charge_amount
