@@ -54,6 +54,8 @@ class EasebuzzSettings(Document):
             for schedule in fees.payment_schedule:
                 if schedule.payment_term == payment_request.payment_term:
                     split_payments = get_split_payment(fees, schedule.invoice_portion)
+        else:
+            split_payments = get_split_payment(fees, 100)
 
         transaction_id = frappe.generate_hash(length=40)
         postDict = {
