@@ -5,27 +5,28 @@ import frappe
 from frappe.model.document import Document
 from easebuzz.easebuzz.utils.easebuzz_payment_gateway import Easebuzz
 from frappe.utils import call_hook_method
-from frappe.utils.data import cint
+from frappe.utils.data import cint, flt
 from payments.utils.utils import create_payment_gateway
 
 
-class EaseBuzzSettings(Document):
+class EasebuzzSettings(Document):
     supported_currencies = ["INR"]
 
-    def init_client(self):
-        if self.merchant_key:
-            salt = self.get_password(fieldname="salt", raise_exception=False)
-            self.client = Easebuzz(self.merchant_key, salt, self.env)
+    def init_client(self,surcharge):
+        settings = frappe.get_doc("Easebuzz Settings", {"surcharge":surcharge})
+        salt = settings.get_password(fieldname="salt", raise_exception=False)
+        self.client = Easebuzz(settings.merchant_key, salt, settings.env)
+        print(f"surcharge enabled {settings.merchant_key} {salt} {settings.env}")
 
     def validate(self):
-        create_payment_gateway("EaseBuzz")
-        call_hook_method("payment_gateway_enabled", gateway="EaseBuzz")
+        create_payment_gateway("Easebuzz")
+        call_hook_method("payment_gateway_enabled", gateway="Easebuzz")
 
     def validate_transaction_currency(self, currency):
         if currency not in self.supported_currencies:
             frappe.throw(
                 frappe._(
-                    "Please select another payment method. EaseBuzz does not support transactions in currency '{0}'"
+                    "Please select another payment method. Easebuzz does not support transactions in currency '{0}'"
                 ).format(currency)
             )
 
@@ -37,7 +38,6 @@ class EaseBuzzSettings(Document):
         fee_docname = payment_request.reference_name
         fees = frappe.get_doc(fee_doctype, fee_docname)
         student = frappe.get_doc("Student", fees.student)
-        self.init_client()
         site_url = frappe.utils.get_url()
         amounts = float(kwargs.get("amount"))
 
@@ -45,27 +45,23 @@ class EaseBuzzSettings(Document):
         show_payment_mode = (
             get_payment_mode(payment_method) if get_payment_mode(payment_method) else ""
         )
-        split_payments = get_split_payment(fees)
-
-        if get_surchage() == 1:
-            charge = frappe.db.get_value(
-                "Payment Methods", {"method": payment_method}, "charge"
-            )
-            total_amount = get_total_amount(amounts, charge)
-            split_payments = get_split_payment_with_charge(
-                fees, split_payments, amounts, charge
-            )
-            surcharge = "enabled"
+        if show_payment_mode in ['CC','DC']:
+            self.init_client(surcharge=1)
         else:
-            total_amount = amounts
-            surcharge = "disabled"
+            self.init_client(surcharge=0)
+
+        if payment_request.payment_term:
+            for schedule in fees.payment_schedule:
+                if schedule.payment_term == payment_request.payment_term:
+                    split_payments = get_split_payment(fees, schedule.invoice_portion)
+
         transaction_id = frappe.generate_hash(length=40)
         postDict = {
             "txnid": transaction_id,
             "firstname": student.first_name,
             "phone": student.student_mobile_number,
             "email": f"{kwargs.get('payer_email')}",
-            "amount": f"{total_amount}",
+            "amount": f"{amounts}",
             "productinfo": payment_request.subject,
             "surl": f"{site_url}/easebuzz/success",
             "furl": f"{site_url}/easebuzz/failure",
@@ -77,7 +73,6 @@ class EaseBuzzSettings(Document):
             "country": student.country,
             "split_payments": split_payments,
             "show_payment_mode": show_payment_mode,
-            "surcharge": surcharge,
             "udf1": f"{doctype}",  # Payment Request Doctype
             "udf2": f"{docname}",  # Payment Request Docname
             "udf3": "",
@@ -132,11 +127,11 @@ class EaseBuzzSettings(Document):
 
 @frappe.whitelist(allow_guest=True)
 def get_merchant_key():
-    controller = frappe.get_doc("EaseBuzz Settings")
+    controller = frappe.get_doc("Easebuzz Settings")
     return controller.merchant_key
 
 
-def get_split_payment(doc):
+def get_split_payment(doc, invoice_portion):
     try:
         split_payment = dict()
         remaining_amount = 0
@@ -149,14 +144,17 @@ def get_split_payment(doc):
                 )
                 label = label.split()[0]
                 if split_payment.get(label) is not None:
-                    split_payment[label] += component.amount
+                    amount = flt((invoice_portion/100) * component.amount,2)
+                    split_payment[label] += amount
                 else:
-                    split_payment[label] = component.amount
+                    amount = flt((invoice_portion/100) * component.amount,2)
+                    split_payment[label] = amount
             except Exception as e:
                 frappe.logger("easebuzz").exception(e)
 
             if label is None:
-                remaining_amount += component.amount
+                amount = flt((invoice_portion/100) * component.amount,2)
+                remaining_amount += amount
         fees_settings = frappe.get_single("Fees Settings")
         default_account = fees_settings.default_account.split()[0]
         if split_payment.get(default_account) is not None:
@@ -177,32 +175,6 @@ def get_payment_mode(method):
         "upi": "UPI",
     }
     return payment_methods.get(method.lower())
-
-
-def get_total_amount(amount, charge):
-    if amount is None:
-        return 0
-
-    if charge is None:
-        return amount
-
-    charge_amount = (amount * float(charge)) / 100
-    total_amount = amount + charge_amount
-    return total_amount
-
-
-def get_split_payment_with_charge(doc, split_payment, amount, charge):
-    if charge is None:
-        return split_payment
-
-    charge_amount = (amount * float(charge)) / 100
-    doc = frappe.get_single("Fees Settings")
-    default_account = doc.default_account.split()[0]
-    if split_payment.get(default_account) is not None:
-        split_payment[default_account] += charge_amount
-    else:
-        split_payment[default_account] = charge_amount
-    return split_payment
 
 
 def get_surchage():

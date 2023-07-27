@@ -142,7 +142,7 @@ def _payment(params, merchant_key, salt, env):
 
     # get URL based on enviroment like (env = 'test' or env = 'prod')
     URL = _getURL(env)
-
+    print(postedArray)
     # process to start pay
     pay_result = _pay(postedArray, salt, URL)
 
@@ -226,7 +226,6 @@ def _removeSpaceAndPreparePostArray(params):
       'zipcode' : get_zipcode(zipcode),
       'split_payments': json.dumps(split_payments).strip() if split_payments is not None else "",
       'show_payment_mode': params['show_payment_mode'].strip(),
-      'surcharge': params['surcharge'].strip(),
     }
     return temp_dictionary
 
