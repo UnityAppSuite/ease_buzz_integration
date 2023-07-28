@@ -49,7 +49,7 @@ class EasebuzzSettings(Document):
             self.init_client(surcharge=1)
         else:
             self.init_client(surcharge=0)
-
+        split_payments = ""
         if payment_request.payment_term:
             for schedule in fees.payment_schedule:
                 if schedule.payment_term == payment_request.payment_term:
