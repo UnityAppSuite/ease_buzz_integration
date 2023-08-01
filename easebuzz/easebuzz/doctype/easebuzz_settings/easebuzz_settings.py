@@ -126,6 +126,21 @@ class EasebuzzSettings(Document):
             else:
                 frappe.msgprint("Payment Request does not exist, Invalid Request")
 
+    def initiateRefund(self, data):
+        amounts = float(data.get("amount"))
+        refund_amount = float(data.get("refund_amount"))
+        self.init_client(surcharge=0)
+        transaction_id = data.get("transaction_id")
+        postDict = {
+            "txnid": f"{transaction_id}",
+            "refund_amount": f"{refund_amount}",
+            "phone": f"{data.get('phone')}",
+            "email": f"{data.get('email')}",
+            "amount": f"{amounts}",
+        }
+        response = self.client.refundAPI(postDict)
+        return response
+
 
 @frappe.whitelist(allow_guest=True)
 def get_merchant_key():
