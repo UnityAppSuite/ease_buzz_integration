@@ -12,8 +12,8 @@ from payments.utils.utils import create_payment_gateway
 class EasebuzzSettings(Document):
     supported_currencies = ["INR"]
 
-    def init_client(self,surcharge):
-        settings = frappe.get_doc("Easebuzz Settings", {"surcharge":surcharge})
+    def init_client(self, surcharge):
+        settings = frappe.get_doc("Easebuzz Settings", {"surcharge": surcharge})
         salt = settings.get_password(fieldname="salt", raise_exception=False)
         self.client = Easebuzz(settings.merchant_key, salt, settings.env)
         print(f"surcharge enabled {settings.merchant_key} {salt} {settings.env}")
@@ -45,7 +45,7 @@ class EasebuzzSettings(Document):
         show_payment_mode = (
             get_payment_mode(payment_method) if get_payment_mode(payment_method) else ""
         )
-        if show_payment_mode in ['CC','DC']:
+        if show_payment_mode in ["CC", "DC"]:
             self.init_client(surcharge=1)
         else:
             self.init_client(surcharge=0)
@@ -58,13 +58,14 @@ class EasebuzzSettings(Document):
             split_payments = get_split_payment(fees, 100)
 
         transaction_id = frappe.generate_hash(length=40)
+        productinfo = "Payment Request for " + student.first_name
         postDict = {
             "txnid": transaction_id,
             "firstname": student.first_name,
             "phone": student.student_mobile_number,
             "email": f"{kwargs.get('payer_email')}",
             "amount": f"{amounts}",
-            "productinfo": payment_request.subject,
+            "productinfo": productinfo,
             "surl": f"{site_url}/easebuzz/success",
             "furl": f"{site_url}/easebuzz/failure",
             "city": student.city,
@@ -154,23 +155,25 @@ def get_split_payment(doc, invoice_portion):
         remaining_amount = 0
         for component in doc.components:
             fees_category = component.fees_category
+            discounted_amount = component.custom_amount_after_discount
+            amount = discounted_amount if discounted_amount else component.amount
             label = None
             try:
                 label = frappe.get_value(
-                    "Split Payment", {"fee_category": fees_category}, "label"
+                    "Fee Category", {"name": fees_category}, "custom_label"
                 )
-                label = label.split()[0]
+                label = label.split("-")[0].strip()
                 if split_payment.get(label) is not None:
-                    amount = flt((invoice_portion/100) * component.amount,2)
+                    amount = flt((invoice_portion / 100) * amount, 2)
                     split_payment[label] += amount
                 else:
-                    amount = flt((invoice_portion/100) * component.amount,2)
+                    amount = flt((invoice_portion / 100) * amount, 2)
                     split_payment[label] = amount
             except Exception as e:
                 frappe.logger("easebuzz").exception(e)
 
             if label is None:
-                amount = flt((invoice_portion/100) * component.amount,2)
+                amount = flt((invoice_portion / 100) * amount, 2)
                 remaining_amount += amount
         fees_settings = frappe.get_single("Fees Settings")
         default_account = fees_settings.default_account.split()[0]

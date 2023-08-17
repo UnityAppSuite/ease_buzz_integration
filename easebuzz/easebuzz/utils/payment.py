@@ -142,7 +142,6 @@ def _payment(params, merchant_key, salt, env):
 
     # get URL based on enviroment like (env = 'test' or env = 'prod')
     URL = _getURL(env)
-    print(postedArray)
     # process to start pay
     pay_result = _pay(postedArray, salt, URL)
 
