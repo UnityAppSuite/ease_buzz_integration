@@ -176,7 +176,7 @@ def get_split_payment(doc, invoice_portion):
                 amount = flt((invoice_portion / 100) * amount, 2)
                 remaining_amount += amount
         fees_settings = frappe.get_single("Fees Settings")
-        default_account = fees_settings.default_account.split()[0]
+        default_account = fees_settings.default_account.split("-")[0].strip()
         if split_payment.get(default_account) is not None:
             split_payment[default_account] += remaining_amount
         else:
