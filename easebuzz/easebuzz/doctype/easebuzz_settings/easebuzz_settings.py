@@ -59,10 +59,12 @@ class EasebuzzSettings(Document):
 
         transaction_id = frappe.generate_hash(length=40)
         productinfo = "Payment Request for " + student.first_name
+        mobile_number = student.student_mobile_number
+        mobile_number = mobile_number if mobile_number else "9999999999"
         postDict = {
             "txnid": transaction_id,
             "firstname": student.first_name,
-            "phone": student.student_mobile_number,
+            "phone": mobile_number,
             "email": f"{kwargs.get('payer_email')}",
             "amount": f"{amounts}",
             "productinfo": productinfo,
@@ -162,13 +164,14 @@ def get_split_payment(doc, invoice_portion):
                 label = frappe.get_value(
                     "Fee Category", {"name": fees_category}, "custom_label"
                 )
-                label = label.split("-")[0].strip()
-                if split_payment.get(label) is not None:
-                    amount = flt((invoice_portion / 100) * amount, 2)
-                    split_payment[label] += amount
-                else:
-                    amount = flt((invoice_portion / 100) * amount, 2)
-                    split_payment[label] = amount
+                if label:
+                    label = label.split("-")[0].strip()
+                    if split_payment.get(label) is not None:
+                        amount = flt((invoice_portion / 100) * amount, 2)
+                        split_payment[label] += amount
+                    else:
+                        amount = flt((invoice_portion / 100) * amount, 2)
+                        split_payment[label] = amount
             except Exception as e:
                 frappe.logger("easebuzz").exception(e)
 
