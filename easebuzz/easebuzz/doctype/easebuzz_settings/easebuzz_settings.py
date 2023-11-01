@@ -16,12 +16,11 @@ class EasebuzzSettings(Document):
         settings = frappe.get_doc("Easebuzz Settings", {"surcharge": surcharge})
         salt = settings.get_password(fieldname="salt", raise_exception=False)
         self.client = Easebuzz(settings.merchant_key, salt, settings.env)
-        print(f"surcharge enabled {settings.merchant_key} {salt} {settings.env}")
 
-    def validate(self):
-        create_payment_gateway("Easebuzz")
+    def after_insert(self):
+        create_payment_gateway("Easebuzz", "Easebuzz Settings", self.name)
         call_hook_method("payment_gateway_enabled", gateway="Easebuzz")
-
+      
     def validate_transaction_currency(self, currency):
         if currency not in self.supported_currencies:
             frappe.throw(
