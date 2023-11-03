@@ -1,32 +1,31 @@
 # Copyright (c) 2023, Hybrowlabs and contributors
 # For license information, please see license.txt
 
-import uuid
 import frappe
 from frappe.model.document import Document
 from easebuzz.easebuzz.utils.easebuzz_payment_gateway import Easebuzz
 from frappe.utils import call_hook_method
-from frappe.utils.data import cint
+from frappe.utils.data import cint, flt
 from payments.utils.utils import create_payment_gateway
 
 
-class EaseBuzzSettings(Document):
+class EasebuzzSettings(Document):
     supported_currencies = ["INR"]
 
-    def init_client(self):
-        if self.merchant_key:
-            salt = self.get_password(fieldname="salt", raise_exception=False)
-            self.client = Easebuzz(self.merchant_key, salt, self.env)
+    def init_client(self, surcharge):
+        settings = frappe.get_doc("Easebuzz Settings", {"surcharge": surcharge})
+        salt = settings.get_password(fieldname="salt", raise_exception=False)
+        self.client = Easebuzz(settings.merchant_key, salt, settings.env)
 
-    def validate(self):
-        create_payment_gateway("EaseBuzz")
-        call_hook_method("payment_gateway_enabled", gateway="EaseBuzz")
-
+    def after_insert(self):
+        create_payment_gateway("Easebuzz", "Easebuzz Settings", self.name)
+        call_hook_method("payment_gateway_enabled", gateway="Easebuzz")
+      
     def validate_transaction_currency(self, currency):
         if currency not in self.supported_currencies:
             frappe.throw(
                 frappe._(
-                    "Please select another payment method. EaseBuzz does not support transactions in currency '{0}'"
+                    "Please select another payment method. Easebuzz does not support transactions in currency '{0}'"
                 ).format(currency)
             )
 
@@ -38,25 +37,48 @@ class EaseBuzzSettings(Document):
         fee_docname = payment_request.reference_name
         fees = frappe.get_doc(fee_doctype, fee_docname)
         student = frappe.get_doc("Student", fees.student)
-        self.init_client()
         site_url = frappe.utils.get_url()
+        amounts = float(kwargs.get("amount"))
+
+        payment_method = str(kwargs.get("payment_method"))
+        show_payment_mode = (
+            get_payment_mode(payment_method) if get_payment_mode(payment_method) else ""
+        )
+        if show_payment_mode in ["CC", "DC"]:
+            self.init_client(surcharge=1)
+        else:
+            self.init_client(surcharge=0)
+        split_payments = ""
+        if payment_request.payment_term:
+            for schedule in fees.payment_schedule:
+                if schedule.payment_term == payment_request.payment_term:
+                    split_payments = get_split_payment(fees, schedule.invoice_portion)
+        else:
+            split_payments = get_split_payment(fees, 100)
+
+        transaction_id = frappe.generate_hash(length=40)
+        productinfo = "Payment Request for " + student.first_name
+        mobile_number = student.student_mobile_number
+        mobile_number = mobile_number if mobile_number else "9999999999"
         postDict = {
-            "txnid": f"{str(uuid.uuid4())[:8]}",
-            "firstname": f"{kwargs.get('payer_name')}",
-            "phone": student.student_mobile_number,
+            "txnid": transaction_id,
+            "firstname": student.first_name,
+            "phone": mobile_number,
             "email": f"{kwargs.get('payer_email')}",
-            "amount": f"{kwargs.get('amount')}",
-            "productinfo": payment_request.subject,
-            "surl": f"{site_url}/success",
-            "furl": f"{site_url}/failure",
+            "amount": f"{amounts}",
+            "productinfo": productinfo,
+            "surl": f"{site_url}/easebuzz/success",
+            "furl": f"{site_url}/easebuzz/failure",
             "city": student.city,
             "zipcode": student.pincode,
+            "address1": student.address_line_1,
             "address2": student.address_line_2,
             "state": student.state,
-            "address1": student.address_line_2,
             "country": student.country,
-            "udf1": f"{fee_doctype}",
-            "udf2": f"{fee_docname}",
+            "split_payments": split_payments,
+            "show_payment_mode": show_payment_mode,
+            "udf1": f"{doctype}",  # Payment Request Doctype
+            "udf2": f"{docname}",  # Payment Request Docname
             "udf3": "",
             "udf4": "",
             "udf5": "",
@@ -82,8 +104,101 @@ class EaseBuzzSettings(Document):
 
         return settings
 
+    def handle_response(self, data):
+        payment_request_doctype = data.get("udf1")
+        payment_request_docname = data.get("udf2")
+        status = data.get("status")
+        transaction_id = data.get("txnid")
+        if status == "success":
+            if frappe.db.exists(payment_request_doctype, payment_request_docname):
+                frappe.msgprint("Payment Request exists")
+                payment_request = frappe.get_doc(
+                    payment_request_doctype,
+                    payment_request_docname,
+                    ignore_permissions=True,
+                )
+                frappe.db.set_value(
+                    payment_request_doctype,
+                    payment_request_docname,
+                    "transaction_id",
+                    transaction_id,
+                )
+                payment_request.on_payment_authorized(status="Completed")
+                return {"message": "Payment Successful"}
+            else:
+                frappe.msgprint("Payment Request does not exist, Invalid Request")
+
+    def initiateRefund(self, data):
+        amounts = float(data.get("amount"))
+        refund_amount = float(data.get("refund_amount"))
+        self.init_client(surcharge=0)
+        transaction_id = data.get("transaction_id")
+        postDict = {
+            "txnid": f"{transaction_id}",
+            "refund_amount": f"{refund_amount}",
+            "phone": f"{data.get('phone')}",
+            "email": f"{data.get('email')}",
+            "amount": f"{amounts}",
+        }
+        response = self.client.refundAPI(postDict)
+        return response
+
 
 @frappe.whitelist(allow_guest=True)
 def get_merchant_key():
-    controller = frappe.get_doc("EaseBuzz Settings")
+    controller = frappe.get_doc("Easebuzz Settings")
     return controller.merchant_key
+
+
+def get_split_payment(doc, invoice_portion):
+    try:
+        split_payment = dict()
+        remaining_amount = 0
+        for component in doc.components:
+            fees_category = component.fees_category
+            discounted_amount = component.custom_amount_after_discount
+            amount = discounted_amount if discounted_amount else component.amount
+            label = None
+            try:
+                label = frappe.get_value(
+                    "Fee Category", {"name": fees_category}, "custom_label"
+                )
+                if label:
+                    label = label.split("-")[0].strip()
+                    if split_payment.get(label) is not None:
+                        amount = flt((invoice_portion / 100) * amount, 2)
+                        split_payment[label] += amount
+                    else:
+                        amount = flt((invoice_portion / 100) * amount, 2)
+                        split_payment[label] = amount
+            except Exception as e:
+                frappe.logger("easebuzz").exception(e)
+
+            if label is None:
+                amount = flt((invoice_portion / 100) * amount, 2)
+                remaining_amount += amount
+        fees_settings = frappe.get_single("Fees Settings")
+        default_account = fees_settings.default_account.split("-")[0].strip()
+        if split_payment.get(default_account) is not None:
+            split_payment[default_account] += remaining_amount
+        else:
+            split_payment[default_account] = remaining_amount
+        return split_payment
+    except Exception as e:
+        frappe.logger("easebuzz").exception(e)
+
+
+def get_payment_mode(method):
+    payment_methods = {
+        "net banking": "NB",
+        "credit card": "CC",
+        "debit card": "DC",
+        "mobile wallet": "MW",
+        "upi": "UPI",
+    }
+    return payment_methods.get(method.lower())
+
+
+def get_surchage():
+    fee_setting = frappe.get_single("Fees Settings")
+    return fee_setting.surcharge

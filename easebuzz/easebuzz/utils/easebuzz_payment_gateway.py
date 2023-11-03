@@ -83,7 +83,6 @@ class Easebuzz:
     def initiatePaymentAPI(self, params):
         from . import payment
         result = payment.initiate_payment(params, self.MERCHANT_KEY, self.SALT, self.ENV)
-        print("Payment URL", result)
         return result.get("data")
 
 

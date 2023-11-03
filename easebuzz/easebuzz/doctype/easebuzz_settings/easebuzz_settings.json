@@ -1,21 +1,25 @@
 {
  "actions": [],
  "allow_rename": 1,
- "creation": "2023-07-03 22:26:12.379562",
+ "autoname": "field:easebuzz_account",
+ "creation": "2023-07-26 13:52:35.145040",
  "default_view": "List",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "easebuzz_account",
   "merchant_key",
   "salt",
-  "env"
+  "env",
+  "surcharge"
  ],
  "fields": [
   {
    "fieldname": "merchant_key",
    "fieldtype": "Data",
-   "label": "Merchant Key"
+   "label": "Merchant Key",
+   "unique": 1
   },
   {
    "fieldname": "salt",
@@ -26,15 +30,27 @@
    "fieldname": "env",
    "fieldtype": "Data",
    "label": "Env"
+  },
+  {
+   "default": "0",
+   "fieldname": "surcharge",
+   "fieldtype": "Check",
+   "label": "Surcharge"
+  },
+  {
+   "fieldname": "easebuzz_account",
+   "fieldtype": "Data",
+   "label": "Easebuzz Account",
+   "unique": 1
   }
  ],
  "index_web_pages_for_search": 1,
- "issingle": 1,
  "links": [],
- "modified": "2023-07-03 22:26:12.379562",
+ "modified": "2023-07-27 15:11:17.802667",
  "modified_by": "Administrator",
  "module": "Easebuzz",
- "name": "EaseBuzz Settings",
+ "name": "Easebuzz Settings",
+ "naming_rule": "By fieldname",
  "owner": "Administrator",
  "permissions": [
   {

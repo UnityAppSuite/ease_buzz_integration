@@ -84,7 +84,6 @@ def _refund(params, merchant_key, salt, env):
         return argument_validation
 
     # push merchant key into params dictionary.
-    params._mutable = True
     params['key'] = merchant_key
 
     # remove white space, htmlentities(converts characters to HTML entities), prepared postedArray
