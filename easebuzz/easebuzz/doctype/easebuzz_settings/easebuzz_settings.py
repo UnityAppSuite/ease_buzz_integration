@@ -52,7 +52,10 @@ class EasebuzzSettings(Document):
         if payment_request.payment_term:
             for schedule in fees.payment_schedule:
                 if schedule.payment_term == payment_request.payment_term:
-                    split_payments = get_split_payment(fees, schedule.invoice_portion)
+                    combination = 0
+                    if "deposit" in schedule.description:
+                        combination = 1
+                    split_payments = get_split_payment(fees, schedule.invoice_portion,combination)
         else:
             split_payments = get_split_payment(fees, 100)
 
@@ -150,11 +153,22 @@ def get_merchant_key():
     return controller.merchant_key
 
 
-def get_split_payment(doc, invoice_portion):
+
+
+def get_split_payment(doc, portion,combination=0):
     try:
         split_payment = dict()
         remaining_amount = 0
         for component in doc.components:
+            invoice_portion = portion
+            fee_type = frappe.db.get_value("Fee Category",component.fees_category,"type")
+            if invoice_portion==100 and fee_type == 'Regular':
+                continue
+            elif fee_type != 'Regular':
+                if combination:
+                    invoice_portion = 100
+                else:
+                    continue
             fees_category = component.fees_category
             discounted_amount = component.custom_amount_after_discount
             amount = discounted_amount if discounted_amount else component.amount
