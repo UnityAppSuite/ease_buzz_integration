@@ -197,6 +197,7 @@ def get_split_payment(doc, portion,combination=0):
             split_payment[default_account] += remaining_amount
         else:
             split_payment[default_account] = remaining_amount
+        frappe.logger('split').exception(split_payment)
         return split_payment
     except Exception as e:
         frappe.logger("easebuzz").exception(e)
