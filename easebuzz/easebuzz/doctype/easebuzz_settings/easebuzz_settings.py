@@ -161,10 +161,9 @@ def get_split_payment(doc, portion,combination=0):
         remaining_amount = 0
         for component in doc.components:
             invoice_portion = portion
-            fee_type = frappe.db.get_value("Fee Category",component.fees_category,"type")
-            if invoice_portion==100 and fee_type == 'Regular':
+            if invoice_portion==100 and component.fee_type == 'Regular':
                 continue
-            elif fee_type != 'Regular' and invoice_portion !=100:
+            elif component.fee_type != 'Regular' and invoice_portion !=100:
                 if combination:
                     invoice_portion = 100
             fees_category = component.fees_category
