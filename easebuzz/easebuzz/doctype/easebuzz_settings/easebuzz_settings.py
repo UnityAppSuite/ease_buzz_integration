@@ -1,6 +1,7 @@
 # Copyright (c) 2023, Hybrowlabs and contributors
 # For license information, please see license.txt
 
+import json
 import frappe
 from frappe.model.document import Document
 from easebuzz.easebuzz.utils.easebuzz_payment_gateway import Easebuzz
@@ -48,16 +49,7 @@ class EasebuzzSettings(Document):
             self.init_client(surcharge=1)
         else:
             self.init_client(surcharge=0)
-        split_payments = ""
-        if payment_request.payment_term:
-            for schedule in fees.payment_schedule:
-                if schedule.payment_term == payment_request.payment_term:
-                    combination = 0
-                    if "deposit" in schedule.description:
-                        combination = 1
-                    split_payments = get_split_payment(fees, schedule.invoice_portion,combination)
-        else:
-            split_payments = get_split_payment(fees, 100)
+        split_payments = get_split_payment(fees, payment_request.payment_term)
 
         transaction_id = frappe.generate_hash(length=40)
         productinfo = "Payment Request for " + student.first_name
@@ -153,51 +145,13 @@ def get_merchant_key():
     return controller.merchant_key
 
 
-
-
-def get_split_payment(doc, portion,combination=0):
+def get_split_payment(fees, term):
     try:
-        split_payment = dict()
-        remaining_amount = 0
-        for component in doc.components:
-            invoice_portion = portion
-            if invoice_portion==100 and component.fee_type == 'Regular':
-                continue
-            elif component.fee_type != 'Regular' and invoice_portion !=100:
-                if combination:
-                    invoice_portion = 100
-            fees_category = component.fees_category
-            discounted_amount = component.custom_amount_after_discount
-            amount = discounted_amount if discounted_amount else component.amount
-            label = None
-            try:
-                label = frappe.get_value(
-                    "Fee Category", {"name": fees_category}, "custom_label"
-                )
-                if label:
-                    label = label.split("-")[0].strip()
-                    if split_payment.get(label) is not None:
-                        amount = flt((invoice_portion / 100) * amount, 2)
-                        split_payment[label] += amount
-                    else:
-                        amount = flt((invoice_portion / 100) * amount, 2)
-                        split_payment[label] = amount
-            except Exception as e:
-                frappe.logger("easebuzz").exception(e)
-
-            if label is None:
-                amount = flt((invoice_portion / 100) * amount, 2)
-                remaining_amount += amount
-        fees_settings = frappe.get_single("Fees Settings")
-        default_account = fees_settings.default_account.split("-")[0].strip()
-        if split_payment.get(default_account) is not None:
-            split_payment[default_account] += remaining_amount
-        else:
-            split_payment[default_account] = remaining_amount
-        frappe.logger('split').exception(split_payment)
-        return split_payment
+        split_payments = json.loads(fees.split_payments)
+        return split_payments.get(term)
     except Exception as e:
-        frappe.logger("easebuzz").exception(e)
+        frappe.logger("split_payment").exception(e)
+        return ""
 
 
 def get_payment_mode(method):
