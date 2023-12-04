@@ -50,6 +50,7 @@ class EasebuzzSettings(Document):
         else:
             self.init_client(surcharge=0)
         split_payments = get_split_payment(fees, payment_request.payment_term)
+        print(split_payments)
 
         transaction_id = frappe.generate_hash(length=40)
         productinfo = "Payment Request for " + student.first_name
@@ -145,10 +146,13 @@ def get_merchant_key():
     return controller.merchant_key
 
 
-def get_split_payment(fees, term):
+def get_split_payment(fees, term=None):
     try:
         split_payments = json.loads(fees.split_payments)
-        return split_payments.get(term)
+        if term:
+            return split_payments.get(term)
+        else:
+            return split_payments.get("Deposit")
     except Exception as e:
         frappe.logger("split_payment").exception(e)
         return ""
