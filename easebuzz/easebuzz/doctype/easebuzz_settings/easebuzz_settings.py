@@ -50,7 +50,7 @@ class EasebuzzSettings(Document):
         else:
             self.init_client(surcharge=0)
         split_payments = get_split_payment(fees, payment_request.payment_term)
-        print(split_payments)
+        # print(split_payments)
 
         transaction_id = frappe.generate_hash(length=40)
         productinfo = "Payment Request for " + student.first_name
@@ -63,7 +63,7 @@ class EasebuzzSettings(Document):
             "email": f"{kwargs.get('payer_email')}",
             "amount": f"{amounts}",
             "productinfo": productinfo,
-            "surl": f"{site_url}/easebuzz/success",
+            "surl": f"{site_url}/payment?payment_request="+ payment_request.payment_hash,
             "furl": f"{site_url}/easebuzz/failure",
             "city": student.city,
             "zipcode": student.pincode,
