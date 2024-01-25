@@ -540,7 +540,7 @@ def _pay(params_array, salt_key, url):
     # requests call for initiate pay link
     request_result = requests.post(url + 'payment/initiateLink', params_array)
     result = json.loads(request_result.content)
-    print(params_array)
+    # print(params_array)
     if result['status'] == 1:
         accesskey = result['data']
     else:
