@@ -101,28 +101,27 @@ class EasebuzzSettings(Document):
         return settings
 
     def handle_response(self, data):
-        payment_request_doctype = data.get("udf1")
-        payment_request_docname = data.get("udf2")
+        doctype = data.get("udf1")
+        docname = data.get("udf2")
         status = data.get("status")
         transaction_id = data.get("txnid")
         if status == "success":
-            if frappe.db.exists(payment_request_doctype, payment_request_docname):
-                frappe.msgprint("Payment Request exists")
+            if frappe.db.exists(doctype, {"name": docname, "status": ["!=", "Paid"]}):
                 payment_request = frappe.get_doc(
-                    payment_request_doctype,
-                    payment_request_docname,
+                    doctype,
+                    docname,
                     ignore_permissions=True,
                 )
                 frappe.db.set_value(
-                    payment_request_doctype,
-                    payment_request_docname,
+                    doctype,
+                    docname,
                     "transaction_id",
                     transaction_id,
                 )
                 payment_request.on_payment_authorized(status="Completed")
                 return {"message": "Payment Successful"}
             else:
-                frappe.msgprint("Payment Request does not exist, Invalid Request")
+                return {"message": "Payment Request does not exist, Or it is Already Paid"}
 
     def initiateRefund(self, data):
         amounts = float(data.get("amount"))
