@@ -31,57 +31,60 @@ class EasebuzzSettings(Document):
             )
 
     def get_payment_url(self, **kwargs):
-        doctype = kwargs.get("reference_doctype")
-        docname = kwargs.get("reference_docname")
-        payment_request = frappe.get_doc(doctype, docname)
-        fee_doctype = payment_request.reference_doctype
-        fee_docname = payment_request.reference_name
-        fees = frappe.get_doc(fee_doctype, fee_docname)
-        student = frappe.get_doc("Student", fees.student)
-        site_url = frappe.utils.get_url()
-        amounts = float(kwargs.get("amount"))
+        try:
+            doctype = kwargs.get("reference_doctype")
+            docname = kwargs.get("reference_docname")
+            payment_request = frappe.get_doc(doctype, docname)
+            fee_doctype = payment_request.reference_doctype
+            fee_docname = payment_request.reference_name
+            fees = frappe.get_doc(fee_doctype, fee_docname)
+            student = frappe.get_doc("Student", fees.student)
+            site_url = frappe.utils.get_url()
+            amounts = float(kwargs.get("amount"))
 
-        payment_method = str(kwargs.get("payment_method"))
-        show_payment_mode = (
-            get_payment_mode(payment_method) if get_payment_mode(payment_method) else ""
-        )
-        if show_payment_mode in ["CC", "DC"]:
-            self.init_client(surcharge=1)
-        else:
-            self.init_client(surcharge=0)
-        split_payments = get_split_payment(fees, payment_request.payment_term)
-        # print(split_payments)
+            payment_method = str(kwargs.get("payment_method"))
+            show_payment_mode = (
+                get_payment_mode(payment_method) if get_payment_mode(payment_method) else ""
+            )
+            if show_payment_mode in ["CC", "DC"]:
+                self.init_client(surcharge=1)
+            else:
+                self.init_client(surcharge=0)
+            split_payments = get_split_payment(fees, payment_request.payment_term)
+            # print(split_payments)
 
-        transaction_id = frappe.generate_hash(length=40)
-        productinfo = "Payment Request for " + student.first_name
-        mobile_number = student.student_mobile_number
-        mobile_number = mobile_number if mobile_number else "9999999999"
-        postDict = {
-            "txnid": transaction_id,
-            "firstname": student.first_name,
-            "phone": mobile_number,
-            "email": f"{kwargs.get('payer_email')}",
-            "amount": f"{amounts}",
-            "productinfo": productinfo,
-            "surl": f"{site_url}/payment?payment_request="+ payment_request.payment_hash,
-            "furl": f"{site_url}/easebuzz/failure",
-            "city": student.city,
-            "zipcode": student.pincode,
-            "address1": student.address_line_1,
-            "address2": student.address_line_2,
-            "state": student.state,
-            "country": student.country,
-            "split_payments": split_payments,
-            "show_payment_mode": show_payment_mode,
-            "udf1": f"{doctype}",  # Payment Request Doctype
-            "udf2": f"{docname}",  # Payment Request Docname
-            "udf3": "",
-            "udf4": "",
-            "udf5": "",
-        }
-        url = self.client.initiatePaymentAPI(postDict)
-        return url
-
+            transaction_id = frappe.generate_hash(length=40)
+            productinfo = "Payment Request for " + student.first_name
+            mobile_number = student.student_mobile_number
+            mobile_number = mobile_number if mobile_number else "9999999999"
+            postDict = {
+                "txnid": transaction_id,
+                "firstname": student.first_name,
+                "phone": mobile_number,
+                "email": f"{kwargs.get('payer_email')}",
+                "amount": f"{amounts}",
+                "productinfo": productinfo,
+                "surl": f"{site_url}/payment?payment_request="+ payment_request.payment_hash,
+                "furl": f"{site_url}/easebuzz/failure",
+                "city": student.city,
+                "zipcode": student.pincode,
+                "address1": student.address_line_1,
+                "address2": student.address_line_2,
+                "state": student.state,
+                "country": student.country,
+                "split_payments": split_payments,
+                "show_payment_mode": show_payment_mode,
+                "udf1": f"{doctype}",  # Payment Request Doctype
+                "udf2": f"{docname}",  # Payment Request Docname
+                "udf3": "",
+                "udf4": "",
+                "udf5": "",
+            }
+            url = self.client.initiatePaymentAPI(postDict)
+            return url
+        except Exception as e:
+            frappe.logger("ease_url").exception(e)
+            return str(e)
     def get_settings(self, data):
         settings = frappe._dict(
             {
