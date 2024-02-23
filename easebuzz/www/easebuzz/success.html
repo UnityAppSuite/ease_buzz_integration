@@ -8,18 +8,6 @@
     <div class="col-sm-6">
         The payment was successful. You will receive an email with the details of the payment.
     </div>
-    <div class="col-sm-6">
-            Redirecting to Receipt Download Page in a few seconds...
-    </div>
 </div>
-<script>
-    const queryString = window.location.search;
-	const urlParams = new URLSearchParams(queryString);
-	const payment_request = urlParams.get('hash');
 
-    setTimeout(function () {
-       window.location.href = "/payment?payment_request=" + payment_request; 
-    }, 5000); 
-
-</script>
 {% endblock %}
