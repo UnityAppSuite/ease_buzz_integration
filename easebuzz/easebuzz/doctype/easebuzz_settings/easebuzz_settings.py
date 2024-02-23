@@ -59,12 +59,12 @@ class EasebuzzSettings(Document):
             mobile_number = mobile_number if mobile_number else "9999999999"
             postDict = {
                 "txnid": transaction_id,
-                "firstname": student.first_name,
+                "firstname": self.process_name(student.first_name),
                 "phone": mobile_number,
                 "email": f"{kwargs.get('payer_email')}",
                 "amount": f"{amounts}",
                 "productinfo": productinfo,
-                "surl": f"{site_url}/payment?payment_request="+ payment_request.payment_hash,
+                "surl": f"{site_url}/easebuzz/success?hash=" + payment_request.payment_hash,
                 "furl": f"{site_url}/easebuzz/failure",
                 "city": student.city,
                 "zipcode": student.pincode,
@@ -85,6 +85,11 @@ class EasebuzzSettings(Document):
         except Exception as e:
             frappe.logger("ease_url").exception(e)
             return str(e)
+
+
+    def process_name(self,name):
+        return ''.join(c for c in name if c.isalnum())
+
     def get_settings(self, data):
         settings = frappe._dict(
             {
