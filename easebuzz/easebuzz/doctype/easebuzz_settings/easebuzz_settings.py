@@ -38,6 +38,7 @@ class EasebuzzSettings(Document):
             fee_doctype = payment_request.reference_doctype
             fee_docname = payment_request.reference_name
             fees = frappe.get_doc(fee_doctype, fee_docname)
+            fees.reload()
             student = frappe.get_doc("Student", fees.student)
             site_url = frappe.utils.get_url()
             amounts = float(kwargs.get("amount"))
@@ -80,6 +81,7 @@ class EasebuzzSettings(Document):
                 "udf4": "",
                 "udf5": "",
             }
+            frappe.logger('ease_settle').exception(postDict)
             url = self.client.initiatePaymentAPI(postDict)
             return url
         except Exception as e:
