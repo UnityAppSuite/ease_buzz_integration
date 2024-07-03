@@ -88,6 +88,62 @@ class EasebuzzSettings(Document):
             frappe.logger("ease_url").exception(e)
             return str(e)
 
+    def get_payment_url_web_form(self, **kwargs):
+        """
+        This function is called from the web form to get the payment url
+        """
+        try:
+            doctype = kwargs.get("reference_doctype")
+            docname = kwargs.get("reference_docname")
+            doc = frappe.get_doc(doctype, docname)
+            docname = docname.replace("(", "@").replace(")", "#")
+            student = frappe.get_doc("Student", doc.student)
+            site_url = frappe.utils.get_url()
+            amounts = float(kwargs.get("amount"))
+            title = f"Payment for {doctype} {student.name} - {student.student_name}"
+
+            payment_method = str(kwargs.get("payment_method"))
+            show_payment_mode = (
+                get_payment_mode(payment_method)
+                if get_payment_mode(payment_method)
+                else ""
+            )
+            if show_payment_mode in ["CC", "DC"]:
+                self.init_client(surcharge=1)
+            else:
+                self.init_client(surcharge=0)
+
+            transaction_id = frappe.generate_hash(length=40)
+            postDict = {
+                "txnid": transaction_id,
+                "firstname": self.process_name(student.first_name),
+                "phone": student.student_mobile_number or "9999999999",
+                "email": f"{kwargs.get('payer_email')}",
+                "amount": f"{amounts}",
+                "productinfo": title,
+                "surl": f"{site_url}/easebuzz/success",
+                "furl": f"{site_url}/easebuzz/failure",
+                "city": student.city,
+                "zipcode": student.pincode,
+                "address1": student.address_line_1,
+                "address2": student.address_line_2,
+                "state": student.state,
+                "country": student.country,
+                "show_payment_mode": show_payment_mode,
+                "udf1": f"{doctype}",  # Doctype
+                "udf2": f"{docname}",  # Docname
+                "udf3": "webform",
+                "udf4": "",
+                "udf5": "",
+            }
+            frappe.logger("ease_settle").exception(postDict)
+            url = self.client.initiatePaymentAPI(postDict)
+            return url
+        except:
+            frappe.log_error(
+                "Error while Generating Payment Link", frappe.get_traceback()
+            )
+
 
     def process_name(self,name):
         return ''.join(c for c in name if c.isalnum())
@@ -133,6 +189,20 @@ class EasebuzzSettings(Document):
                 return {"message": "Payment Successful"}
             else:
                 frappe.msgprint("Payment Request does not exist, Invalid Request")
+
+    def handle_response_web_form(self, data):
+        doctype = data.get("udf1")
+        docname = data.get("udf2")
+        docname = docname.replace("@", "(").replace("#", ")")
+        status = data.get("status")
+        transaction_id = data.get("txnid")
+        if status == "success":
+            if frappe.db.exists(doctype, docname):
+                frappe.db.set_value(doctype, docname, "transaction_id", transaction_id)
+                doc = frappe.get_doc(doctype, docname, ignore_permissions=True)
+                return doc.validate_payment(data)
+            else:
+                frappe.log_error(f"{doctype} {docname} does not exist")
 
     def initiateRefund(self, data):
         amounts = float(data.get("amount"))

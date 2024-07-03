@@ -29,8 +29,7 @@ class CustomPaymentWebForm(PaymentWebForm):
                 "order_id": doc.name,
                 "currency": self.currency,
                 "redirect_to": frappe.utils.get_url(self.success_url or self.route),
-                "webform": True,
             }
 
             # Redirect the user to this url
-            return controller.get_payment_url(**payment_details)
+            return controller.get_payment_url_web_form(**payment_details)
