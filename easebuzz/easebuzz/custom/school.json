@@ -14,7 +14,7 @@
             "creation": "2024-07-18 17:46:49.483582",
             "default": null,
             "depends_on": null,
-            "description": "Default Bank Label for Payments",
+            "description": "Default Bank Label for Event Payments",
             "docstatus": 0,
             "dt": "School",
             "fetch_from": null,

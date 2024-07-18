@@ -113,6 +113,8 @@ class EasebuzzSettings(Document):
             else:
                 self.init_client(surcharge=0)
 
+            split_payments = kwargs.get("split_payments", {})
+
             transaction_id = frappe.generate_hash(length=40)
             postDict = {
                 "txnid": transaction_id,
@@ -129,6 +131,7 @@ class EasebuzzSettings(Document):
                 "address2": student.address_line_2,
                 "state": student.state,
                 "country": student.country,
+                "split_payments": split_payments,
                 "show_payment_mode": show_payment_mode,
                 "udf1": f"{doctype}",  # Doctype
                 "udf2": f"{docname}",  # Docname

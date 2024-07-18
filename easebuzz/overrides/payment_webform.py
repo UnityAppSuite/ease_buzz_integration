@@ -18,6 +18,12 @@ class CustomPaymentWebForm(PaymentWebForm):
             if amount is None or Decimal(amount) <= 0:
                 return frappe.utils.get_url(self.success_url or self.route)
 
+            split_payments = {}
+            if doc.school:
+                bank_label = frappe.get_value("School", doc.school, "default_bank_label")
+                label = frappe.get_value("Bank Account", bank_label, "account_name")
+                split_payments[label] = amount
+
             payment_details = {
                 "amount": amount,
                 "title": title,
@@ -29,6 +35,7 @@ class CustomPaymentWebForm(PaymentWebForm):
                 "order_id": doc.name,
                 "currency": self.currency,
                 "redirect_to": frappe.utils.get_url(self.success_url or self.route),
+                "split_payments": split_payments,
             }
 
             # Redirect the user to this url
