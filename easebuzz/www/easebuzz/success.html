@@ -2,12 +2,33 @@
 
 {% block title %}{{ _("Payment Successful") }}{% endblock %}
 
-{% block page_content %}
-<h1>{{ _("Payment Successful") }}</h1>
-<div class="row">
-    <div class="col-sm-6">
-        The payment was successful. You will receive an email with the details of the payment.
-    </div>
+{%- block page_content -%}
+<div class='page-card'>
+	<div class='page-card-head'>
+		<span class='indicator green'>
+			{{ _("Success") }}</span>
+	</div>
+	<p>{{ payment_message or _("The payment was successful. You will receive an email with the details of the payment.") }}</p>
+	{% if not payment_message %}
+		<div>
+			<a
+			   href='{{ frappe.form_dict.redirect_to or "/" }}'
+			   class='btn btn-primary btn-sm'>
+				{{ _("Continue") }}
+			</a>
+		</div>
+	{% endif %}
 </div>
-
+<style>
+{% include "templates/styles/card_style.css" %}
+</style>
+<script>
+	frappe.ready(function() {
+		if('{{ frappe.form_dict.redirect_to or "" }}'){
+			setTimeout(function(){
+				window.location.href = '{{ frappe.form_dict.redirect_to }}';
+			}, 4000);
+		}
+	})
+</script>
 {% endblock %}
