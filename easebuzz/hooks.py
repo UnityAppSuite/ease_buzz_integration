@@ -64,13 +64,13 @@ app_license = "MIT"
 # ------------
 
 # before_install = "easebuzz.install.before_install"
-# after_install = "easebuzz.install.after_install"
+after_install = "easebuzz.install.after_install"
 
 # Uninstallation
 # ------------
 
 # before_uninstall = "easebuzz.uninstall.before_uninstall"
-# after_uninstall = "easebuzz.uninstall.after_uninstall"
+after_uninstall = "easebuzz.uninstall.after_uninstall"
 
 # Desk Notifications
 # ------------------
@@ -95,20 +95,18 @@ app_license = "MIT"
 # Override standard doctype classes
 
 override_doctype_class = {
-	"Web Form": "easebuzz.overrides.payment_webform.CustomPaymentWebForm"
+	"Web Form": "easebuzz.overrides.payment_webform.CustomPaymentWebForm",
 }
 
 # Document Events
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-#	"*": {
-#		"on_update": "method",
-#		"on_cancel": "method",
-#		"on_trash": "method"
-#	}
-# }
+doc_events = {
+	"Company": {
+		"on_update": "easebuzz.overrides.company.on_update"
+	}
+}
 
 # Scheduled Tasks
 # ---------------
