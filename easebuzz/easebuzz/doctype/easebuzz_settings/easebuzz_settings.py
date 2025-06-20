@@ -223,6 +223,48 @@ class EasebuzzSettings(Document):
         return response
 
 
+    def generate_payment_url(self, **kwargs):
+        try:
+            student = frappe.get_doc("Student", kwargs.get("student"))
+            site_url = frappe.utils.get_url()
+            amount = flt(kwargs.get("amount", 0))
+            transaction_id = frappe.generate_hash()
+            fee_hash = kwargs.get("fee_hash", "")
+            email = student.student_email_id
+            post_data = {
+                "txnid": transaction_id,
+                "firstname": self.process_name(student.first_name),
+                "phone": student.student_mobile_number or "",
+                "email": email,
+                "amount": amount,
+                "productinfo": f"Payment Request for {email}",
+                "surl": f"{site_url}/payment-response?fee_id={fee_hash}&status=success",
+                "furl": f"{site_url}/payment-response?fee_id={fee_hash}&status=failure",
+                "city": student.city,
+                "zipcode": student.pincode,
+                "address1": student.address_line_1,
+                "address2": student.address_line_2,
+                "state": student.state,
+                "country": student.country,
+                "show_payment_mode": get_payment_mode(kwargs.get("payment_method")),
+                "udf1": kwargs.get("reference_doctype", ""),
+                "udf2": kwargs.get("reference_docname", ""),
+                "udf3": kwargs.get("payment_term", ""),
+                "udf4": kwargs.get("payment_plan", ""),
+                "udf5": fee_hash,
+            }
+
+            # Optional field
+            split_payments = kwargs.get("split_payments")
+            if split_payments:
+                post_data["split_payments"] = split_payments
+
+            return self.client.initiatePaymentAPI(post_data)
+
+        except Exception:
+            frappe.log_error("Error in generate_payment_url", frappe.get_traceback())
+            return None
+
 @frappe.whitelist(allow_guest=True)
 def get_merchant_key():
     controller = frappe.get_doc("Easebuzz Settings")
