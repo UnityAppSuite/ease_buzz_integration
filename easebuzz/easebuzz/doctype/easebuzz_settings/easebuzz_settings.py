@@ -13,6 +13,7 @@ from payments.utils.utils import create_payment_gateway
 class EasebuzzSettings(Document):
     supported_currencies = ["INR"]
 
+
     def init_client(self, surcharge):
         settings = frappe.get_doc("Easebuzz Settings", {"surcharge": surcharge})
         salt = settings.get_password(fieldname="salt", raise_exception=False)
@@ -142,7 +143,7 @@ class EasebuzzSettings(Document):
             frappe.logger("ease_settle").exception(postDict)
             url = self.client.initiatePaymentAPI(postDict)
             return url
-        except:
+        except Exception:
             frappe.log_error(
                 "Error while Generating Payment Link", frappe.get_traceback()
             )
@@ -150,6 +151,18 @@ class EasebuzzSettings(Document):
 
     def process_name(self,name):
         return ''.join(c for c in name if c.isalnum())
+    
+    def format_data(self, value, reverse=False):
+        """
+        Format data for payment gateway compatibility.
+        Replaces '(' with '@' and ')' with '#' when reverse is False,
+        and vice versa when reverse is True.
+        """
+        if not value or not isinstance(value, str):
+            return value or ""
+        if reverse:
+            return value.replace("@", "(").replace("#", ")").strip()
+        return value.strip().replace("(", "@").replace(")", "#")
 
     def get_settings(self, data):
         settings = frappe._dict(
@@ -225,36 +238,43 @@ class EasebuzzSettings(Document):
 
     def generate_payment_url(self, **kwargs):
         try:
+            # Initialize the Easebuzz client
+            salt = self.get_password(fieldname="salt", raise_exception=False)
+            self.client = Easebuzz(self.merchant_key, salt, self.env)
+            # Validate the student and retrieve necessary details
             student = frappe.get_doc("Student", kwargs.get("student"))
             site_url = frappe.utils.get_url()
             amount = flt(kwargs.get("amount", 0))
-            transaction_id = frappe.generate_hash()
+            transaction_id = frappe.generate_hash(length=40)
             fee_hash = kwargs.get("fee_hash", "")
             email = student.student_email_id
+            payment_plan = kwargs.get("payment_plan", "")
+            reference_name = kwargs.get("reference_docname", "")
+            first_name = self.process_name(student.first_name)
+            # Prepare the post data for payment initiation
             post_data = {
                 "txnid": transaction_id,
-                "firstname": self.process_name(student.first_name),
-                "phone": student.student_mobile_number or "",
+                "firstname": first_name,
+                "phone": student.student_mobile_number or "9999999999",
                 "email": email,
-                "amount": amount,
-                "productinfo": f"Payment Request for {email}",
+                "city": student.city or "",
+                "zipcode": student.pincode or "",
+                "address1": student.address_line_1 or "",
+                "address2": student.address_line_2 or "",
+                "state": student.state or "",
+                "country": student.country or "",
+                "amount": str(amount),
+                "productinfo": f"Payment Request for {first_name}",
                 "surl": f"{site_url}/payment-response?fee_id={fee_hash}&status=success",
                 "furl": f"{site_url}/payment-response?fee_id={fee_hash}&status=failure",
-                "city": student.city,
-                "zipcode": student.pincode,
-                "address1": student.address_line_1,
-                "address2": student.address_line_2,
-                "state": student.state,
-                "country": student.country,
                 "show_payment_mode": get_payment_mode(kwargs.get("payment_method")),
                 "udf1": kwargs.get("reference_doctype", ""),
-                "udf2": kwargs.get("reference_docname", ""),
+                "udf2": self.format_data(reference_name),
                 "udf3": kwargs.get("payment_term", ""),
-                "udf4": kwargs.get("payment_plan", ""),
+                "udf4": self.format_data(payment_plan),
                 "udf5": fee_hash,
             }
-
-            # Optional field
+            # Process split payments if provided
             split_payments = kwargs.get("split_payments")
             if split_payments:
                 post_data["split_payments"] = split_payments
@@ -291,7 +311,7 @@ def get_payment_mode(method):
         "mobile wallet": "MW",
         "upi": "UPI",
     }
-    return payment_methods.get(method.lower())
+    return payment_methods.get(method.lower()) or ""
 
 
 def get_surchage():
