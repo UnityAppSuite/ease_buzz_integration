@@ -1,167 +1,138 @@
-# Copyright (c) 2024, Hybrowlabs and contributors
-# For license information, please see license.txt
-
 import frappe
 from frappe.model.document import Document
 import json
 
 class EasebuzzSettlementLog(Document):
-	pass
+    pass
 
-def process_log(doc,method=None):
-	try:
-		#data = doc.data[25:-73]
-		data = json.loads(doc.data)
-		for split in data.get('split_payouts'):
-			label = split.get("account_number")
-			company_name = frappe.db.get_value(
-				"Bank Account",
-				{'bank_account_no': label},
-				'company'
-			)
-			if not company_name:
-				frappe.throw(f"No Bank Account found with Easebuzz account number {label}")
-			company = frappe.get_doc("Company", company_name)
+def make_account_entry(account, debit, credit, against_account, cost_center,
+                       currency="INR", exchange_rate=1):
+    return {
+        "account": account,
+        "account_type": "",
+        "cost_center": cost_center,
+        "account_currency": currency,
+        "exchange_rate": exchange_rate,
+        "debit_in_account_currency": debit,
+        "debit": debit,
+        "credit_in_account_currency": credit,
+        "credit": credit,
+        "is_advance": "No",
+        "against_account": against_account
+    }
 
-			je = frappe.new_doc("Journal Entry")
-			amount = split.get('payout_amount')
-			bank_account = frappe.db.get_value(
-				"Bank Account",
-				{'bank_account_no': label},
-				'account'
-			)
+def get_account_and_company(label):
+    account = frappe.db.get_value(
+        "Bank Account", {'bank_account_no': label}, 'account'
+    )
+    company_name = frappe.db.get_value(
+        "Bank Account", {'bank_account_no': label}, 'company'
+    )
+    if not company_name:
+        frappe.throw(f"No Bank Account found with Easebuzz account number {label}")
+    company = frappe.get_doc("Company", company_name)
+    return account, company
 
-			je.update({
-				"is_system_generated": 1,
-				"title": "Easebuzz Settlement",
-				"voucher_type": "Bank Entry",
-				"naming_series": "ACC-JV-.YYYY.-",
-				"company": company.name,
-				"posting_date": split.get("payout_date"),
-				"cheque_no": split.get("bank_transaction_id"),
-				"cheque_date": split.get("payout_date"),
-				"user_remark": "Easebuzz Settlement",
-				"total_debit": amount,
-				"total_credit": amount,
-				"write_off_based_on": "Accounts Receivable",
-				"write_off_amount": 0,
-				"letter_head": "Default letter head",
-				"mode_of_payment": "Online",
-				"is_opening": "No",
-				"repost_required": 0,
-				"doctype": "Journal Entry",
-			})
+def create_journal_entry(title, company, posting_date, cheque_no, cheque_date,
+                         remark, total_amount, accounts_data):
+    je = frappe.new_doc("Journal Entry")
+    je.update({
+        "is_system_generated": 1,
+        "title": title,
+        "voucher_type": "Bank Entry",
+        "naming_series": "ACC-JV-.YYYY.-",
+        "company": company.name,
+        "posting_date": posting_date,
+        "cheque_no": cheque_no,
+        "cheque_date": cheque_date,
+        "user_remark": remark,
+        "total_debit": total_amount,
+        "total_credit": total_amount,
+        "write_off_based_on": "Accounts Receivable",
+        "write_off_amount": 0,
+        "letter_head": "Default letter head",
+        "mode_of_payment": "Online",
+        "is_opening": "No",
+        "repost_required": 0,
+        "doctype": "Journal Entry",
+    })
+    for acc in accounts_data:
+        je.append("accounts", acc)
+    je.insert(ignore_permissions=True)
+    je.submit()
 
-			je.append("accounts", {
-				"account": bank_account,
-				"account_type": "",
-				"cost_center": company.cost_center,
-				"account_currency": "INR",
-				"exchange_rate": 1,
-				"debit_in_account_currency": amount,
-				"debit": amount,
-				"credit_in_account_currency": 0,
-				"credit": 0,
-				"is_advance": "No",
-				"against_account": company.default_easebuzz_account
-			})
-			je.append("accounts", {
-				"account": company.default_easebuzz_account,
-				"account_type": "",
-				"cost_center": company.cost_center,
-				"account_currency": "INR",
-				"exchange_rate": 1,
-				"debit_in_account_currency": 0,
-				"debit": 0,
-				"credit_in_account_currency": amount,
-				"credit": amount,
-				"is_advance": "No",
-				"against_account": bank_account
-			})
+def process_log(doc, method=None):
+    try:
+        data = json.loads(doc.data)
 
-			je.insert(ignore_permissions=True)
-			je.submit()
+        # 1) Settlement payouts
+        for split in data.get('split_payouts', []):
+            label = split.get('account_number')
+            amount = split.get('payout_amount', 0)
+            bank_acc, company = get_account_and_company(label)
 
-		# 2) Charges entries
-		for settled_transaction in data.get('settled_transactions'):
-			if settled_transaction.get('transaction_type') in ('Netbanking', 'UPI'):
-				for split_transaction in settled_transaction.get('split_transactions'):
-					label = split_transaction.get("account_number")
-					bank_account = frappe.db.get_value(
-						"Bank Account",
-						{'bank_account_no': label},
-						'account'
-					)
-					company_name = frappe.db.get_value(
-						"Bank Account",
-						{'bank_account_no': label},
-						'company'
-					)
-					if not company_name:
-						frappe.throw(f"No Bank Account found with Easebuzz account number {label}")
-					company = frappe.get_doc("Company", company_name)
+            accounts = [
+                make_account_entry(
+                    bank_acc, amount, 0,
+                    company.default_easebuzz_account,
+                    company.cost_center
+                ),
+                make_account_entry(
+                    company.default_easebuzz_account, 0, amount,
+                    bank_acc,
+                    company.cost_center
+                )
+            ]
 
-					fee_amount = (
-						split_transaction.get('service_charge', 0)
-						+ split_transaction.get("service_tax", 0)
-					)
-					if not fee_amount:
-						continue
+            create_journal_entry(
+                title="Easebuzz Settlement",
+                company=company,
+                posting_date=split.get('payout_date'),
+                cheque_no=split.get('bank_transaction_id'),
+                cheque_date=split.get('payout_date'),
+                remark="Easebuzz Settlement",
+                total_amount=amount,
+                accounts_data=accounts
+            )
 
-					je = frappe.new_doc("Journal Entry")
-					je.update({
-						"is_system_generated": 1,
-						"title": "Easebuzz Settlement Charges",
-						"voucher_type": "Bank Entry",
-						"naming_series": "ACC-JV-.YYYY.-",
-						"company": company.name,
-						"posting_date": frappe.utils.nowdate(),
-						"cheque_no": settled_transaction.get("txnid"),
-						"cheque_date": frappe.utils.nowdate(),
-						"user_remark": f"Easebuzz charges - easepayid:{settled_transaction.get('easepayid')}",
-						"total_debit": fee_amount,
-						"total_credit": fee_amount,
-						"write_off_based_on": "Accounts Receivable",
-						"write_off_amount": 0,
-						"letter_head": "Default letter head",
-						"mode_of_payment": "Online",
-						"is_opening": "No",
-						"repost_required": 0,
-						"doctype": "Journal Entry",
-					})
+        # 2) Charges entries
+        for txn in data.get('settled_transactions', []):
+            if txn.get('transaction_type') in ('Netbanking', 'UPI'):
+                fee_amount = 0
+                for st in txn.get('split_transactions', []):
+                    fee_amount += st.get('service_charge', 0) + st.get('service_tax', 0)
+                if not fee_amount:
+                    continue
 
-					# Debit the charges expense account
-					je.append("accounts", {
-						"account": company.custom_easebuzz_charges,
-						"account_type": "",
-						"cost_center": company.cost_center,
-						"account_currency": "INR",
-						"exchange_rate": 1,
-						"debit_in_account_currency": fee_amount,
-						"debit": fee_amount,
-						"credit_in_account_currency": 0,
-						"credit": 0,
-						"is_advance": "No",
-						"against_account": bank_account
-					})
+                for split in txn.get('split_transactions', []):
+                    label = split.get('account_number')
+                    bank_acc, company = get_account_and_company(label)
 
-					# Credit the actual bank account you fetched
-					je.append("accounts", {
-						"account": bank_account,
-						"account_type": "",
-						"cost_center": company.cost_center,
-						"account_currency": "INR",
-						"exchange_rate": 1,
-						"debit": 0,
-						"debit_in_account_currency": 0,
-						"credit": fee_amount,
-						"credit_in_account_currency": fee_amount,
-						"is_advance": "No",
-						"against_account": company.custom_easebuzz_charges
-					})
+                    accounts = [
+                        make_account_entry(
+                            company.custom_easebuzz_charges,
+                            fee_amount, 0,
+                            bank_acc,
+                            company.cost_center
+                        ),
+                        make_account_entry(
+                            bank_acc, 0,
+                            fee_amount,
+                            company.custom_easebuzz_charges,
+                            company.cost_center
+                        )
+                    ]
 
-					je.insert(ignore_permissions=True)
-					je.submit()
+                    create_journal_entry(
+                        title="Easebuzz Settlement Charges",
+                        company=company,
+                        posting_date=frappe.utils.nowdate(),
+                        cheque_no=txn.get('txnid'),
+                        cheque_date=frappe.utils.nowdate(),
+                        remark=f"Easebuzz charges - easepayid:{txn.get('easepayid')}",
+                        total_amount=fee_amount,
+                        accounts_data=accounts
+                    )
 
-	except Exception as e:
-		frappe.logger('ease').exception(e)
+    except Exception as e:
+        frappe.logger('ease').exception(e)
