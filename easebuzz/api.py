@@ -1,7 +1,7 @@
 import frappe
 import requests
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist(allow_guest=True, methods=["POST"])
 def webhook_handler(**kwargs):
     try:
         data = frappe.parse_json(kwargs)

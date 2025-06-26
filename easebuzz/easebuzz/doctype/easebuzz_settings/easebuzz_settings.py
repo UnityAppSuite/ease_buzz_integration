@@ -3,6 +3,7 @@
 
 import json
 import frappe
+from frappe.auth import LoginManager
 from frappe.model.document import Document
 from easebuzz.easebuzz.utils.easebuzz_payment_gateway import Easebuzz
 from frappe.utils import call_hook_method
@@ -183,28 +184,53 @@ class EasebuzzSettings(Document):
         return settings
 
     def handle_response(self, data):
-        payment_request_doctype = data.get("udf1")
-        payment_request_docname = data.get("udf2")
-        status = data.get("status")
-        transaction_id = data.get("txnid")
-        if status == "success":
-            if frappe.db.exists(payment_request_doctype, payment_request_docname):
-                frappe.msgprint("Payment Request exists")
-                payment_request = frappe.get_doc(
-                    payment_request_doctype,
-                    payment_request_docname,
-                    ignore_permissions=True,
+        """
+        Handle the response from the Easebuzz payment gateway
+        """
+        try:
+            # TODO: need to create a new user for this purpose
+            login_manager = LoginManager()
+            login_manager.login_as("Administrator")
+            
+            # Extract and validate required data
+            doctype = data.get("udf1")
+            docname = self.format_data(data.get("udf2"), reverse=True)
+            payment_term = data.get("udf3")
+            status = data.get("status")
+            amount = data.get("amount")
+            transaction_id = data.get("txnid")
+            
+            if status != "success":
+                return {"message": "Payment Validation Failed"}
+            
+            # Validate document exists
+            if not frappe.db.exists(doctype, docname):
+                frappe.log_error(f"{doctype} {docname} does not exist")
+                return {"message": "Document not found"}
+            
+            # Process payment based on doctype
+            doc = frappe.get_doc(doctype, docname, ignore_permissions=True)
+            
+            if doctype == "Fees":
+                doc.on_payment_authorized(
+                    status="Completed", 
+                    payment_term=payment_term, 
+                    transaction_id=transaction_id, 
+                    amount=amount
                 )
-                frappe.db.set_value(
-                    payment_request_doctype,
-                    payment_request_docname,
-                    "transaction_id",
-                    transaction_id,
-                )
-                payment_request.on_payment_authorized(status="Completed")
-                return {"message": "Payment Successful"}
+            elif doctype == "Payment Request":
+                doc.on_payment_authorized(status="Completed")
             else:
-                frappe.msgprint("Payment Request does not exist, Invalid Request")
+                frappe.log_error(f"Unsupported doctype: {doctype} name: {docname}")
+                return {"message": "Unsupported document type"}
+            
+            return {"message": "Payment Successful"}
+            
+        except Exception as e:
+            frappe.log_error("Error in handle_response", frappe.get_traceback())
+            return {"message": "Payment processing failed"}
+        finally:
+            login_manager.logout()
 
     def handle_response_web_form(self, data):
         doctype = data.get("udf1")
@@ -265,8 +291,8 @@ class EasebuzzSettings(Document):
                 "country": student.country or "",
                 "amount": str(amount),
                 "productinfo": f"Payment Request for {first_name}",
-                "surl": f"{site_url}/payment-response?fee_id={fee_hash}&status=success",
-                "furl": f"{site_url}/payment-response?fee_id={fee_hash}&status=failure",
+                "surl": kwargs.get("success_url") or f"{site_url}/easebuzz/success",
+                "furl": kwargs.get("failure_url") or f"{site_url}/easebuzz/failure",
                 "show_payment_mode": get_payment_mode(kwargs.get("payment_method")),
                 "udf1": kwargs.get("reference_doctype", ""),
                 "udf2": self.format_data(reference_name),
