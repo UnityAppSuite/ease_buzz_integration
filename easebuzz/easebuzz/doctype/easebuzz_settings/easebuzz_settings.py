@@ -51,8 +51,6 @@ class EasebuzzSettings(Document):
                 self.init_client(surcharge=1)
             else:
                 self.init_client(surcharge=0)
-            split_payments = get_split_payment(fees, payment_request.payment_term)
-            # print(split_payments)
 
             transaction_id = frappe.generate_hash(length=40)
             productinfo = "Payment Request for " + student.first_name
@@ -73,7 +71,6 @@ class EasebuzzSettings(Document):
                 "address2": student.address_line_2,
                 "state": student.state,
                 "country": student.country,
-                "split_payments": split_payments,
                 "show_payment_mode": show_payment_mode,
                 "udf1": f"{doctype}",  # Payment Request Doctype
                 "udf2": f"{docname}",  # Payment Request Docname
@@ -81,6 +78,11 @@ class EasebuzzSettings(Document):
                 "udf4": "",
                 "udf5": "",
             }
+
+            if kwargs.get("enable_split_payment"):
+                split_payments = get_split_payment(fees, payment_request.payment_term)
+                postDict["split_payments"] = split_payments
+
             frappe.logger('ease_settle').exception(postDict)
             url = self.client.initiatePaymentAPI(postDict)
             return url
