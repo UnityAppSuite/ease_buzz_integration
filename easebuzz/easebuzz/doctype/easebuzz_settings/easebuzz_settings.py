@@ -44,9 +44,7 @@ class EasebuzzSettings(Document):
             amounts = float(kwargs.get("amount"))
 
             payment_method = str(kwargs.get("payment_method"))
-            show_payment_mode = (
-                get_payment_mode(payment_method) if get_payment_mode(payment_method) else ""
-            )
+            show_payment_mode = get_payment_mode(payment_method)
             if show_payment_mode in ["CC", "DC"]:
                 self.init_client(surcharge=1)
             else:
@@ -105,17 +103,12 @@ class EasebuzzSettings(Document):
             title = f"Payment for {doctype} {student.name} - {student.student_name}"
 
             payment_method = str(kwargs.get("payment_method"))
-            show_payment_mode = (
-                get_payment_mode(payment_method)
-                if get_payment_mode(payment_method)
-                else ""
-            )
+            show_payment_mode = get_payment_mode(payment_method)
             if show_payment_mode in ["CC", "DC"]:
                 self.init_client(surcharge=1)
             else:
                 self.init_client(surcharge=0)
 
-            split_payments = kwargs.get("split_payments", {})
 
             transaction_id = frappe.generate_hash(length=40)
             postDict = {
@@ -133,7 +126,6 @@ class EasebuzzSettings(Document):
                 "address2": student.address_line_2,
                 "state": student.state,
                 "country": student.country,
-                "split_payments": split_payments,
                 "show_payment_mode": show_payment_mode,
                 "udf1": f"{doctype}",  # Doctype
                 "udf2": f"{docname}",  # Docname
@@ -141,6 +133,11 @@ class EasebuzzSettings(Document):
                 "udf4": "",
                 "udf5": "",
             }
+
+            if kwargs.get("enable_split_payment") and kwargs.get("split_payments"):
+                split_payments = kwargs.get("split_payments", {})
+                postDict["split_payments"] = split_payments
+
             frappe.logger("ease_settle").exception(postDict)
             url = self.client.initiatePaymentAPI(postDict)
             return url
@@ -251,7 +248,7 @@ def get_payment_mode(method):
         "mobile wallet": "MW",
         "upi": "UPI",
     }
-    return payment_methods.get(method.lower())
+    return payment_methods.get(method.lower(), "")
 
 
 def get_surchage():

@@ -201,6 +201,8 @@ def _removeSpaceAndPreparePostArray(params):
     state = params.get('state')
     country = params.get('country')
     zipcode = params.get('zipcode')
+    show_payment_mode = params.get('show_payment_mode')
+    split_payments = params.get('split_payments')
 
     temp_dictionary = {
       'key' : params['key'].strip(),
@@ -223,9 +225,11 @@ def _removeSpaceAndPreparePostArray(params):
       'state' : get_state(state),
       'country' : get_country(country),
       'zipcode' : get_zipcode(zipcode),
-      'split_payments': json.dumps(split_payments).strip() if split_payments is not None else "",
-      'show_payment_mode': params['show_payment_mode'].strip(),
     }
+    if split_payments:
+        temp_dictionary['split_payments'] = json.dumps(split_payments).strip()
+    if show_payment_mode:
+        temp_dictionary['show_payment_mode'] = show_payment_mode.strip()
     return temp_dictionary
 
 
