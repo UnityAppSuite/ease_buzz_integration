@@ -61,6 +61,7 @@ def create_journal_entry(title, company, posting_date, cheque_no, cheque_date,
     je.insert(ignore_permissions=True)
     je.submit()
 
+@frappe.whitelist()
 def process_log(doc, method=None):
     try:
         data = json.loads(doc.data)
