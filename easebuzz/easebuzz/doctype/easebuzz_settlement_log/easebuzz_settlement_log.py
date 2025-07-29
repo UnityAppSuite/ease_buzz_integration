@@ -3,7 +3,11 @@ from frappe.model.document import Document
 import json
 
 class EasebuzzSettlementLog(Document):
-    pass
+    def process_log(self):
+        """
+        Process the settlement log data and create necessary journal entries.
+        """
+        process_log(self, method=None)
 
 def make_account_entry(account, debit, credit, against_account, cost_center,
                        currency="INR", exchange_rate=1):
