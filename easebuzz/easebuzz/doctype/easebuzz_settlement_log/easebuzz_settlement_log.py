@@ -3,7 +3,11 @@ from frappe.model.document import Document
 import json
 
 class EasebuzzSettlementLog(Document):
-    pass
+    def process_log(self):
+        """
+        Process the settlement log data and create necessary journal entries.
+        """
+        process_log(self, method=None)
 
 def make_account_entry(account, debit, credit, against_account, cost_center,
                        currency="INR", exchange_rate=1):
@@ -61,6 +65,7 @@ def create_journal_entry(title, company, posting_date, cheque_no, cheque_date,
     je.insert(ignore_permissions=True)
     je.submit()
 
+@frappe.whitelist()
 def process_log(doc, method=None):
     try:
         data = json.loads(doc.data)
