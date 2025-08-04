@@ -3,11 +3,12 @@ from frappe.model.document import Document
 import json
 
 class EasebuzzSettlementLog(Document):
-    def process_log(self):
+    def after_insert(self):
         """
         Process the settlement log data and create necessary journal entries.
         """
-        process_log(self, method=None)
+        frappe.enqueue(process_log, queue='long', enqueue_after_commit=True, doc=self)
+        # self.process_log()
 
 def make_account_entry(account, debit, credit, against_account, cost_center,
                        currency="INR", exchange_rate=1):
@@ -34,6 +35,8 @@ def get_account_and_company(label):
     )
     if not company_name:
         frappe.throw(f"No Bank Account found with Easebuzz account number {label}")
+    if not account:
+        frappe.throw(f"No GL Account linked to Bank Account with account number {label}")
     company = frappe.get_doc("Company", company_name)
     return account, company
 
@@ -68,7 +71,13 @@ def create_journal_entry(title, company, posting_date, cheque_no, cheque_date,
 @frappe.whitelist()
 def process_log(doc, method=None):
     try:
-        data = json.loads(doc.data)
+        # Handle case where doc.data is a string representation of a dict
+        if isinstance(doc.data, str) and doc.data.startswith("{'"):
+            import ast
+            doc_dict = ast.literal_eval(doc.data)
+            data = json.loads(doc_dict['data'])
+        else:
+            data = json.loads(doc.data)
 
         # 1) Settlement payouts
         for split in data.get('split_payouts', []):
