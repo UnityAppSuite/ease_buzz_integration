@@ -11,8 +11,12 @@
   "easebuzz_account",
   "merchant_key",
   "salt",
+  "column_break_mpph",
   "env",
-  "surcharge"
+  "surcharge",
+  "enable_sub_merchant",
+  "section_break_dgcv",
+  "sub_merchant_details"
  ],
  "fields": [
   {
@@ -42,11 +46,34 @@
    "fieldtype": "Data",
    "label": "Easebuzz Account",
    "unique": 1
+  },
+  {
+   "fieldname": "column_break_mpph",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_sub_merchant",
+   "fieldtype": "Check",
+   "label": "Enable Sub Merchant"
+  },
+  {
+   "depends_on": "enable_sub_merchant",
+   "fieldname": "section_break_dgcv",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "sub_merchant_details",
+   "fieldtype": "Table",
+   "label": "Sub Merchant Details",
+   "mandatory_depends_on": "enable_sub_merchant",
+   "options": "Easebuzz Sub Merchant"
   }
  ],
+ "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2023-07-27 15:11:17.802667",
+ "modified": "2025-08-25 18:47:00.564779",
  "modified_by": "Administrator",
  "module": "Easebuzz",
  "name": "Easebuzz Settings",
@@ -64,6 +91,7 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": []

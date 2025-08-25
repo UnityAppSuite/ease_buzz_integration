@@ -6,7 +6,7 @@ import frappe
 from frappe.model.document import Document
 from easebuzz.easebuzz.utils.easebuzz_payment_gateway import Easebuzz
 from frappe.utils import call_hook_method
-from frappe.utils.data import cint, flt
+from frappe.utils.data import cint
 from payments.utils.utils import create_payment_gateway
 
 
@@ -75,6 +75,7 @@ class EasebuzzSettings(Document):
                 "country": student.country,
                 "split_payments": split_payments,
                 "show_payment_mode": show_payment_mode,
+                "sub_merchant_id": self.get_sub_merchant_id(school=student.school),
                 "udf1": f"{doctype}",  # Payment Request Doctype
                 "udf2": f"{docname}",  # Payment Request Docname
                 "udf3": "",
@@ -87,6 +88,18 @@ class EasebuzzSettings(Document):
         except Exception as e:
             frappe.logger("ease_url").exception(e)
             return str(e)
+        
+    def get_sub_merchant_id(self, school=None, student=None):
+        if not self.enable_sub_merchant:
+            return None
+        if school:
+            filters = {"reference_doctype": "School", "reference_name": school}
+            return frappe.get_cached_value("Easebuzz Sub Merchant", filters, "merchant_id")
+        if student:
+            school = frappe.get_cached_value("Student", student, "school")
+            filters = {"reference_doctype": "School", "reference_name": school}
+            return frappe.get_cached_value("Easebuzz Sub Merchant", filters, "merchant_id")
+        return None
 
     def get_payment_url_web_form(self, **kwargs):
         """
@@ -142,7 +155,7 @@ class EasebuzzSettings(Document):
             frappe.logger("ease_settle").exception(postDict)
             url = self.client.initiatePaymentAPI(postDict)
             return url
-        except:
+        except Exception:
             frappe.log_error(
                 "Error while Generating Payment Link", frappe.get_traceback()
             )
