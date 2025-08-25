@@ -44,9 +44,7 @@ class EasebuzzSettings(Document):
             amounts = float(kwargs.get("amount"))
 
             payment_method = str(kwargs.get("payment_method"))
-            show_payment_mode = (
-                get_payment_mode(payment_method) if get_payment_mode(payment_method) else ""
-            )
+            show_payment_mode = get_payment_mode(payment_method)
             if show_payment_mode in ["CC", "DC"]:
                 self.init_client(surcharge=1)
             else:
@@ -73,15 +71,17 @@ class EasebuzzSettings(Document):
                 "address2": student.address_line_2,
                 "state": student.state,
                 "country": student.country,
-                "split_payments": split_payments,
                 "show_payment_mode": show_payment_mode,
-                "sub_merchant_id": self.get_sub_merchant_id(school=student.school),
                 "udf1": f"{doctype}",  # Payment Request Doctype
                 "udf2": f"{docname}",  # Payment Request Docname
                 "udf3": "",
                 "udf4": "",
                 "udf5": "",
             }
+            if self.enable_split_payment:
+                postDict["split_payments"] = split_payments
+            if self.enable_sub_merchant:
+                postDict["sub_merchant_id"] = self.get_sub_merchant_id(school=student.school)
             frappe.logger('ease_settle').exception(postDict)
             url = self.client.initiatePaymentAPI(postDict)
             return url
@@ -90,8 +90,6 @@ class EasebuzzSettings(Document):
             return str(e)
         
     def get_sub_merchant_id(self, school=None, student=None):
-        if not self.enable_sub_merchant:
-            return None
         if school:
             filters = {"reference_doctype": "School", "reference_name": school}
             return frappe.get_cached_value("Easebuzz Sub Merchant", filters, "merchant_id")
@@ -116,11 +114,7 @@ class EasebuzzSettings(Document):
             title = f"Payment for {doctype} {student.name} - {student.student_name}"
 
             payment_method = str(kwargs.get("payment_method"))
-            show_payment_mode = (
-                get_payment_mode(payment_method)
-                if get_payment_mode(payment_method)
-                else ""
-            )
+            show_payment_mode = get_payment_mode(payment_method)
             if show_payment_mode in ["CC", "DC"]:
                 self.init_client(surcharge=1)
             else:
@@ -144,7 +138,6 @@ class EasebuzzSettings(Document):
                 "address2": student.address_line_2,
                 "state": student.state,
                 "country": student.country,
-                "split_payments": split_payments,
                 "show_payment_mode": show_payment_mode,
                 "udf1": f"{doctype}",  # Doctype
                 "udf2": f"{docname}",  # Docname
@@ -152,6 +145,10 @@ class EasebuzzSettings(Document):
                 "udf4": "",
                 "udf5": "",
             }
+            if self.enable_split_payment:
+                postDict["split_payments"] = split_payments
+            if self.enable_sub_merchant:
+                postDict["sub_merchant_id"] = self.get_sub_merchant_id(school=student.school)
             frappe.logger("ease_settle").exception(postDict)
             url = self.client.initiatePaymentAPI(postDict)
             return url
@@ -262,7 +259,7 @@ def get_payment_mode(method):
         "mobile wallet": "MW",
         "upi": "UPI",
     }
-    return payment_methods.get(method.lower())
+    return payment_methods.get(method.lower(), "")
 
 
 def get_surchage():

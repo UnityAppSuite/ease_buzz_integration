@@ -195,7 +195,6 @@ def _checkArgumentValidation(*arg):
 
 
 def _removeSpaceAndPreparePostArray(params):
-    split_payments = params.get("split_payments")
     address1 = params.get("address1")
     address2 = params.get("address2")
     city = params.get("city")
@@ -226,7 +225,7 @@ def _removeSpaceAndPreparePostArray(params):
         "zipcode": get_zipcode(zipcode),
         "show_payment_mode": params["show_payment_mode"].strip(),
     }
-    if split_payments:
+    if split_payments := params.get("split_payments"):
         temp_dictionary["split_payments"] = json.dumps(split_payments).strip()
     if sub_merchant_id := params.get("sub_merchant_id"):
         temp_dictionary["sub_merchant_id"] = sub_merchant_id.strip()
