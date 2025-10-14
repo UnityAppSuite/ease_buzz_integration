@@ -108,10 +108,13 @@ class EasebuzzSettings(Document):
             docname = kwargs.get("reference_docname")
             doc = frappe.get_doc(doctype, docname)
             docname = docname.replace("(", "@").replace(")", "#")
-            student = frappe.get_doc("Student", doc.student)
+            if doctype == "Student Applicant":
+                student = doc
+            else:
+                student = frappe.get_doc("Student", doc.student)
             site_url = frappe.utils.get_url()
             amounts = float(kwargs.get("amount"))
-            title = f"Payment for {doctype} {student.name} - {student.student_name}"
+            title = f"Payment for {doctype} {student.name} - {student.first_name}"
 
             payment_method = str(kwargs.get("payment_method"))
             show_payment_mode = get_payment_mode(payment_method)
@@ -127,7 +130,7 @@ class EasebuzzSettings(Document):
                 "txnid": transaction_id,
                 "firstname": self.process_name(student.first_name),
                 "phone": student.student_mobile_number or "9999999999",
-                "email": f"{kwargs.get('payer_email')}",
+                "email": student.student_email_id or f"{kwargs.get('payer_email')}",
                 "amount": f"{amounts}",
                 "productinfo": title,
                 "surl": f"{site_url}/easebuzz/success",
@@ -213,7 +216,10 @@ class EasebuzzSettings(Document):
             if frappe.db.exists(doctype, docname):
                 frappe.db.set_value(doctype, docname, "transaction_id", transaction_id)
                 doc = frappe.get_doc(doctype, docname, ignore_permissions=True)
-                return doc.validate_payment(data)
+                if hasattr(doc, "validate_payment"):
+                    return doc.validate_payment(data)
+                else:
+                    return {"message": "Payment Successful"}
             else:
                 frappe.log_error(f"{doctype} {docname} does not exist")
 
