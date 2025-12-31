@@ -149,6 +149,46 @@ class EasebuzzSettings(Document):
                 "Error while Generating Payment Link", frappe.get_traceback()
             )
 
+    def get_payment_url_applicant(self, **kwargs):
+        """Generate payment URL for Student Applicant deposit payment."""
+        try:
+            applicant_id = kwargs.get("applicant_id")
+            applicant = frappe.get_doc("Student Applicant", applicant_id)
+            site_url = frappe.utils.get_url()
+
+            student_name = kwargs.get("student_name") or f"{applicant.first_name} {applicant.last_name or ''}".strip()
+            payment_method = kwargs.get("payment_method") or ""
+            show_payment_mode = get_payment_mode(payment_method) if payment_method else ""
+
+            self.init_client(surcharge=1 if show_payment_mode in ["CC", "DC"] else 0)
+
+            postDict = {
+                "txnid": frappe.generate_hash(length=40),
+                "firstname": self.process_name(applicant.first_name or "Applicant"),
+                "phone": kwargs.get("payer_phone") or applicant.student_mobile_number or "9999999999",
+                "email": kwargs.get("payer_email") or applicant.student_email_id,
+                "amount": f"{float(kwargs.get('amount'))}",
+                "productinfo": f"Deposit Payment for {student_name}",
+                "surl": f"{site_url}/easebuzz/success",
+                "furl": f"{site_url}/easebuzz/failure",
+                "city": applicant.city or "",
+                "zipcode": applicant.pincode or "",
+                "address1": applicant.address_line_1 or "",
+                "address2": applicant.address_line_2 or "",
+                "state": applicant.state or "",
+                "country": applicant.country or "India",
+                "split_payments": kwargs.get("split_payments", ""),
+                "show_payment_mode": show_payment_mode,
+                "udf1": "Student Applicant",
+                "udf2": applicant_id,
+                "udf3": "applicant",
+                "udf4": "",
+                "udf5": "",
+            }
+            return self.client.initiatePaymentAPI(postDict)
+        except Exception as e:
+            frappe.log_error(f"Error generating Applicant Payment Link: {str(e)}", frappe.get_traceback())
+            return None
 
     def process_name(self,name):
         return ''.join(c for c in name if c.isalnum())
@@ -213,13 +253,21 @@ class EasebuzzSettings(Document):
             
             if doctype == "Fees":
                 doc.on_payment_authorized(
-                    status="Completed", 
-                    payment_term=payment_term, 
-                    transaction_id=transaction_id, 
+                    status="Completed",
+                    payment_term=payment_term,
+                    transaction_id=transaction_id,
                     amount=amount
                 )
             elif doctype == "Payment Request":
                 doc.on_payment_authorized(status="Completed")
+            elif doctype == "Student Applicant":
+                result = doc.on_payment_authorized(
+                    status="Completed",
+                    transaction_id=transaction_id,
+                    amount=amount
+                )
+                frappe.logger("easebuzz").info(f"Applicant payment processed: {result}")
+                return result
             else:
                 frappe.log_error(f"Unsupported doctype: {doctype} name: {docname}")
                 return {"message": "Unsupported document type"}
