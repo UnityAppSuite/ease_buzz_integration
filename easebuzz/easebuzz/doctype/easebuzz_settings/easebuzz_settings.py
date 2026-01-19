@@ -30,6 +30,56 @@ class EasebuzzSettings(Document):
                 ).format(currency)
             )
 
+    def generate_payment_url(self, **kwargs):
+        """Direct payment URL generation for Fees (without Payment Request)."""
+        try:
+            fees = frappe.get_doc(kwargs.get("reference_doctype"), kwargs.get("reference_docname"))
+            student = frappe.get_doc("Student", fees.student)
+            site_url = frappe.utils.get_url()
+            amounts = float(kwargs.get("amount"))
+
+            payment_method = str(kwargs.get("payment_method") or "")
+            show_payment_mode = get_payment_mode(payment_method) if get_payment_mode(payment_method) else ""
+            if show_payment_mode in ["CC", "DC"]:
+                self.init_client(surcharge=1)
+            else:
+                self.init_client(surcharge=0)
+
+            split_payments = kwargs.get("split_payments") or ""
+            transaction_id = frappe.generate_hash(length=40)
+            productinfo = f"Payment for {student.first_name}"
+            mobile_number = student.student_mobile_number or "9999999999"
+
+            postDict = {
+                "txnid": transaction_id,
+                "firstname": self.process_name(student.first_name),
+                "phone": mobile_number,
+                "email": f"{kwargs.get('payer_email')}",
+                "amount": f"{amounts}",
+                "productinfo": productinfo,
+                "surl": kwargs.get("success_url", f"{site_url}/easebuzz/success"),
+                "furl": kwargs.get("failure_url", f"{site_url}/easebuzz/failure"),
+                "city": student.city,
+                "zipcode": student.pincode,
+                "address1": student.address_line_1,
+                "address2": student.address_line_2,
+                "state": student.state,
+                "country": student.country,
+                "split_payments": split_payments,
+                "show_payment_mode": show_payment_mode,
+                "udf1": kwargs.get("reference_doctype", ""),
+                "udf2": kwargs.get("reference_docname", ""),
+                "udf3": kwargs.get("fee_hash", ""),
+                "udf4": kwargs.get("payment_term", ""),
+                "udf5": "",
+            }
+            frappe.logger('ease_settle').exception(postDict)
+            url = self.client.initiatePaymentAPI(postDict)
+            return url
+        except Exception as e:
+            frappe.logger("ease_url").exception(e)
+            return None
+
     def get_payment_url(self, **kwargs):
         try:
             doctype = kwargs.get("reference_doctype")
