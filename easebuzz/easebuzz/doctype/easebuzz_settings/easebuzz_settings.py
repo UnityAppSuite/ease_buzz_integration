@@ -378,6 +378,8 @@ def get_split_payment(fees, term=None):
 
 
 def get_payment_mode(method):
+    if not method:
+        return ""
     payment_methods = {
         "net banking": "NB",
         "credit card": "CC",
