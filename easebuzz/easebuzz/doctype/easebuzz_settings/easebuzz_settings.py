@@ -3,6 +3,7 @@
 
 import json
 import frappe
+from frappe.auth import LoginManager
 from frappe.model.document import Document
 from easebuzz.easebuzz.utils.easebuzz_payment_gateway import Easebuzz
 from frappe.utils import call_hook_method
@@ -12,6 +13,7 @@ from payments.utils.utils import create_payment_gateway
 
 class EasebuzzSettings(Document):
     supported_currencies = ["INR"]
+
 
     def init_client(self, surcharge):
         settings = frappe.get_doc("Easebuzz Settings", {"surcharge": surcharge})
@@ -142,14 +144,66 @@ class EasebuzzSettings(Document):
             frappe.logger("ease_settle").exception(postDict)
             url = self.client.initiatePaymentAPI(postDict)
             return url
-        except:
+        except Exception:
             frappe.log_error(
                 "Error while Generating Payment Link", frappe.get_traceback()
             )
 
+    def get_payment_url_applicant(self, **kwargs):
+        """Generate payment URL for Student Applicant deposit payment."""
+        try:
+            applicant_id = kwargs.get("applicant_id")
+            applicant = frappe.get_doc("Student Applicant", applicant_id)
+            site_url = frappe.utils.get_url()
+
+            student_name = kwargs.get("student_name") or f"{applicant.first_name} {applicant.last_name or ''}".strip()
+            payment_method = kwargs.get("payment_method") or ""
+            show_payment_mode = get_payment_mode(payment_method) if payment_method else ""
+
+            self.init_client(surcharge=1 if show_payment_mode in ["CC", "DC"] else 0)
+
+            postDict = {
+                "txnid": frappe.generate_hash(length=40),
+                "firstname": self.process_name(applicant.first_name or "Applicant"),
+                "phone": kwargs.get("payer_phone") or applicant.student_mobile_number or "9999999999",
+                "email": kwargs.get("payer_email") or applicant.student_email_id,
+                "amount": f"{float(kwargs.get('amount'))}",
+                "productinfo": f"Deposit Payment for {student_name}",
+                "surl": f"{site_url}/easebuzz/success",
+                "furl": f"{site_url}/easebuzz/failure",
+                "city": applicant.city or "",
+                "zipcode": applicant.pincode or "",
+                "address1": applicant.address_line_1 or "",
+                "address2": applicant.address_line_2 or "",
+                "state": applicant.state or "",
+                "country": applicant.country or "India",
+                "split_payments": kwargs.get("split_payments", ""),
+                "show_payment_mode": show_payment_mode,
+                "udf1": "Student Applicant",
+                "udf2": applicant_id,
+                "udf3": "applicant",
+                "udf4": "",
+                "udf5": "",
+            }
+            return self.client.initiatePaymentAPI(postDict)
+        except Exception as e:
+            frappe.log_error(f"Error generating Applicant Payment Link: {str(e)}", frappe.get_traceback())
+            return None
 
     def process_name(self,name):
         return ''.join(c for c in name if c.isalnum())
+    
+    def format_data(self, value, reverse=False):
+        """
+        Format data for payment gateway compatibility.
+        Replaces '(' with '@' and ')' with '#' when reverse is False,
+        and vice versa when reverse is True.
+        """
+        if not value or not isinstance(value, str):
+            return value or ""
+        if reverse:
+            return value.replace("@", "(").replace("#", ")").strip()
+        return value.strip().replace("(", "@").replace(")", "#")
 
     def get_settings(self, data):
         settings = frappe._dict(
@@ -170,28 +224,61 @@ class EasebuzzSettings(Document):
         return settings
 
     def handle_response(self, data):
-        payment_request_doctype = data.get("udf1")
-        payment_request_docname = data.get("udf2")
-        status = data.get("status")
-        transaction_id = data.get("txnid")
-        if status == "success":
-            if frappe.db.exists(payment_request_doctype, payment_request_docname):
-                frappe.msgprint("Payment Request exists")
-                payment_request = frappe.get_doc(
-                    payment_request_doctype,
-                    payment_request_docname,
-                    ignore_permissions=True,
+        """
+        Handle the response from the Easebuzz payment gateway
+        """
+        try:
+            # TODO: need to create a new user for this purpose
+            login_manager = LoginManager()
+            login_manager.login_as("Administrator")
+            
+            # Extract and validate required data
+            doctype = data.get("udf1")
+            docname = self.format_data(data.get("udf2"), reverse=True)
+            payment_term = data.get("udf3")
+            status = data.get("status")
+            amount = data.get("amount")
+            transaction_id = data.get("txnid")
+            
+            if status != "success":
+                return {"message": "Payment Validation Failed"}
+            
+            # Validate document exists
+            if not frappe.db.exists(doctype, docname):
+                frappe.log_error(f"{doctype} {docname} does not exist")
+                return {"message": "Document not found"}
+            
+            # Process payment based on doctype
+            doc = frappe.get_doc(doctype, docname, ignore_permissions=True)
+            
+            if doctype == "Fees":
+                doc.on_payment_authorized(
+                    status="Completed",
+                    payment_term=payment_term,
+                    transaction_id=transaction_id,
+                    amount=amount
                 )
-                frappe.db.set_value(
-                    payment_request_doctype,
-                    payment_request_docname,
-                    "transaction_id",
-                    transaction_id,
+            elif doctype == "Payment Request":
+                doc.on_payment_authorized(status="Completed")
+            elif doctype == "Student Applicant":
+                result = doc.on_payment_authorized(
+                    status="Completed",
+                    transaction_id=transaction_id,
+                    amount=amount
                 )
-                payment_request.on_payment_authorized(status="Completed")
-                return {"message": "Payment Successful"}
+                frappe.logger("easebuzz").info(f"Applicant payment processed: {result}")
+                return result
             else:
-                frappe.msgprint("Payment Request does not exist, Invalid Request")
+                frappe.log_error(f"Unsupported doctype: {doctype} name: {docname}")
+                return {"message": "Unsupported document type"}
+            
+            return {"message": "Payment Successful"}
+            
+        except Exception as e:
+            frappe.log_error("Error in handle_response", frappe.get_traceback())
+            return {"message": "Payment processing failed"}
+        finally:
+            login_manager.logout()
 
     def handle_response_web_form(self, data):
         doctype = data.get("udf1")
@@ -223,6 +310,55 @@ class EasebuzzSettings(Document):
         return response
 
 
+    def generate_payment_url(self, **kwargs):
+        try:
+            # Initialize the Easebuzz client
+            salt = self.get_password(fieldname="salt", raise_exception=False)
+            self.client = Easebuzz(self.merchant_key, salt, self.env)
+            # Validate the student and retrieve necessary details
+            student = frappe.get_doc("Student", kwargs.get("student"))
+            site_url = frappe.utils.get_url()
+            amount = flt(kwargs.get("amount", 0))
+            transaction_id = frappe.generate_hash(length=40)
+            fee_hash = kwargs.get("fee_hash", "")
+            email = student.student_email_id
+            payment_plan = kwargs.get("payment_plan", "")
+            reference_name = kwargs.get("reference_docname", "")
+            first_name = self.process_name(student.first_name)
+            # Prepare the post data for payment initiation
+            post_data = {
+                "txnid": transaction_id,
+                "firstname": first_name,
+                "phone": student.student_mobile_number or "9999999999",
+                "email": email,
+                "city": student.city or "",
+                "zipcode": student.pincode or "",
+                "address1": student.address_line_1 or "",
+                "address2": student.address_line_2 or "",
+                "state": student.state or "",
+                "country": student.country or "",
+                "amount": str(amount),
+                "productinfo": f"Payment Request for {first_name}",
+                "surl": kwargs.get("success_url") or f"{site_url}/easebuzz/success",
+                "furl": kwargs.get("failure_url") or f"{site_url}/easebuzz/failure",
+                "show_payment_mode": get_payment_mode(kwargs.get("payment_method")),
+                "udf1": kwargs.get("reference_doctype", ""),
+                "udf2": self.format_data(reference_name),
+                "udf3": kwargs.get("payment_term", ""),
+                "udf4": self.format_data(payment_plan),
+                "udf5": fee_hash,
+            }
+            # Process split payments if provided
+            split_payments = kwargs.get("split_payments")
+            if split_payments:
+                post_data["split_payments"] = split_payments
+
+            return self.client.initiatePaymentAPI(post_data)
+
+        except Exception:
+            frappe.log_error("Error in generate_payment_url", frappe.get_traceback())
+            return None
+
 @frappe.whitelist(allow_guest=True)
 def get_merchant_key():
     controller = frappe.get_doc("Easebuzz Settings")
@@ -242,6 +378,8 @@ def get_split_payment(fees, term=None):
 
 
 def get_payment_mode(method):
+    if not method:
+        return ""
     payment_methods = {
         "net banking": "NB",
         "credit card": "CC",
@@ -249,7 +387,7 @@ def get_payment_mode(method):
         "mobile wallet": "MW",
         "upi": "UPI",
     }
-    return payment_methods.get(method.lower())
+    return payment_methods.get(method.lower()) or ""
 
 
 def get_surchage():
