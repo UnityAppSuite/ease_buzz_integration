@@ -1,8 +1,9 @@
 import re
 import json
 import frappe
-import requests
 from hashlib import sha512
+
+from easebuzz.easebuzz.utils.api_client import make_request
 
 '''
 * initiate_payment method initiate payment and call dispay the payment page.
@@ -535,12 +536,17 @@ def _pay(params_array, salt_key, url):
 
     params_array['hash'] = hash_key
 
-    # requests call for initiate pay link
-    request_result = requests.post(url + 'payment/initiateLink', params_array)
-    result = json.loads(request_result.content)
-    # print(params_array)
-    if result['status'] == 1:
-        accesskey = result['data']
+    # Make API call with logging
+    full_url = url + 'payment/initiateLink'
+    result = make_request(
+        url=full_url,
+        data=params_array,
+        service="Initiate Payment",
+        method="POST"
+    )
+
+    if result.get('status') == 1:
+        accesskey = result.get('data', '')
     else:
         accesskey = ""
 
