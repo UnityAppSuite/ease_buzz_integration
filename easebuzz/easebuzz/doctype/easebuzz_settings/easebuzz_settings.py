@@ -32,6 +32,16 @@ class EasebuzzSettings(Document):
                 ).format(currency)
             )
 
+    def get_sub_merchant_id(self, school=None, student=None):
+        if school:
+            filters = {"reference_doctype": "School", "reference_name": school}
+            return frappe.get_cached_value("Easebuzz Sub Merchant", filters, "merchant_id")
+        if student:
+            school = frappe.get_cached_value("Student", student, "school")
+            filters = {"reference_doctype": "School", "reference_name": school}
+            return frappe.get_cached_value("Easebuzz Sub Merchant", filters, "merchant_id")
+        return None
+
     def get_payment_url(self, **kwargs):
         try:
             doctype = kwargs.get("reference_doctype")
@@ -75,7 +85,6 @@ class EasebuzzSettings(Document):
                 "address2": student.address_line_2,
                 "state": student.state,
                 "country": student.country,
-                "split_payments": split_payments,
                 "show_payment_mode": show_payment_mode,
                 "udf1": f"{doctype}",  # Payment Request Doctype
                 "udf2": f"{docname}",  # Payment Request Docname
@@ -83,6 +92,10 @@ class EasebuzzSettings(Document):
                 "udf4": "",
                 "udf5": "",
             }
+            if self.enable_split_payment:
+                postDict["split_payments"] = split_payments
+            if self.enable_sub_merchant:
+                postDict["sub_merchant_id"] = self.get_sub_merchant_id(school=student.school)
             frappe.logger('ease_settle').exception(postDict)
             url = self.client.initiatePaymentAPI(postDict)
             return url
@@ -99,10 +112,13 @@ class EasebuzzSettings(Document):
             docname = kwargs.get("reference_docname")
             doc = frappe.get_doc(doctype, docname)
             docname = docname.replace("(", "@").replace(")", "#")
-            student = frappe.get_doc("Student", doc.student)
+            if doctype == "Student Applicant":
+                student = doc
+            else:
+                student = frappe.get_doc("Student", doc.student)
             site_url = frappe.utils.get_url()
             amounts = float(kwargs.get("amount"))
-            title = f"Payment for {doctype} {student.name} - {student.student_name}"
+            title = f"Payment for {doctype} {student.name} - {student.first_name}"
 
             payment_method = str(kwargs.get("payment_method"))
             show_payment_mode = (
@@ -122,7 +138,7 @@ class EasebuzzSettings(Document):
                 "txnid": transaction_id,
                 "firstname": self.process_name(student.first_name),
                 "phone": student.student_mobile_number or "9999999999",
-                "email": f"{kwargs.get('payer_email')}",
+                "email": student.student_email_id or f"{kwargs.get('payer_email')}",
                 "amount": f"{amounts}",
                 "productinfo": title,
                 "surl": f"{site_url}/easebuzz/success",
@@ -133,7 +149,6 @@ class EasebuzzSettings(Document):
                 "address2": student.address_line_2,
                 "state": student.state,
                 "country": student.country,
-                "split_payments": split_payments,
                 "show_payment_mode": show_payment_mode,
                 "udf1": f"{doctype}",  # Doctype
                 "udf2": f"{docname}",  # Docname
@@ -141,6 +156,10 @@ class EasebuzzSettings(Document):
                 "udf4": "",
                 "udf5": "",
             }
+            if self.enable_split_payment:
+                postDict["split_payments"] = split_payments
+            if self.enable_sub_merchant:
+                postDict["sub_merchant_id"] = self.get_sub_merchant_id(school=student.school)
             frappe.logger("ease_settle").exception(postDict)
             url = self.client.initiatePaymentAPI(postDict)
             return url
@@ -290,7 +309,10 @@ class EasebuzzSettings(Document):
             if frappe.db.exists(doctype, docname):
                 frappe.db.set_value(doctype, docname, "transaction_id", transaction_id)
                 doc = frappe.get_doc(doctype, docname, ignore_permissions=True)
-                return doc.validate_payment(data)
+                if hasattr(doc, "validate_payment"):
+                    return doc.validate_payment(data)
+                else:
+                    return {"message": "Payment Successful"}
             else:
                 frappe.log_error(f"{doctype} {docname} does not exist")
 

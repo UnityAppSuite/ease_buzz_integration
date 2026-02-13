@@ -30,6 +30,8 @@ def get_account_and_company(label):
     )
     if not company_name:
         frappe.throw(f"No Bank Account found with Easebuzz account number {label}")
+    if not account:
+        frappe.throw(f"No GL Account linked to Bank Account with account number {label}")
     company = frappe.get_doc("Company", company_name)
     return account, company
 
@@ -63,7 +65,12 @@ def create_journal_entry(title, company, posting_date, cheque_no, cheque_date,
 
 def process_log(doc, method=None):
     try:
-        data = json.loads(doc.data)
+        if isinstance(doc.data, str) and doc.data.startswith("{'"):
+            import ast
+            doc_dict = ast.literal_eval(doc.data)
+            data = json.loads(doc_dict['data'])
+        else:
+            data = json.loads(doc.data)
 
         # 1) Settlement payouts
         for split in data.get('split_payouts', []):
