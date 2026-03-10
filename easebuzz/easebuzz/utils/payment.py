@@ -225,6 +225,11 @@ def _removeSpaceAndPreparePostArray(params):
     }
     if split_payments:
         temp_dictionary['split_payments'] = json.dumps(split_payments).strip()
+
+    sub_merchant_id = params.get('sub_merchant_id')
+    if sub_merchant_id:
+        temp_dictionary['sub_merchant_id'] = sub_merchant_id.strip()
+
     return temp_dictionary
 
 

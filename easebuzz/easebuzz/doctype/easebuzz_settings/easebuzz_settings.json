@@ -12,7 +12,11 @@
   "merchant_key",
   "salt",
   "env",
-  "surcharge"
+  "surcharge",
+  "section_break_sub_merchant",
+  "enable_sub_merchant",
+  "enable_split_payment",
+  "sub_merchant_details"
  ],
  "fields": [
   {
@@ -42,11 +46,35 @@
    "fieldtype": "Data",
    "label": "Easebuzz Account",
    "unique": 1
+  },
+  {
+   "fieldname": "section_break_sub_merchant",
+   "fieldtype": "Section Break",
+   "label": "Sub Merchant Configuration"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_sub_merchant",
+   "fieldtype": "Check",
+   "label": "Enable Sub Merchant"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_split_payment",
+   "fieldtype": "Check",
+   "label": "Enable Split Payment"
+  },
+  {
+   "depends_on": "eval:doc.enable_sub_merchant",
+   "fieldname": "sub_merchant_details",
+   "fieldtype": "Table",
+   "label": "Sub Merchant Details",
+   "options": "Easebuzz Sub Merchant"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2023-07-27 15:11:17.802667",
+ "modified": "2024-10-01 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Easebuzz",
  "name": "Easebuzz Settings",

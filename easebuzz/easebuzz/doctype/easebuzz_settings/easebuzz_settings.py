@@ -20,6 +20,17 @@ class EasebuzzSettings(Document):
         salt = settings.get_password(fieldname="salt", raise_exception=False)
         self.client = Easebuzz(settings.merchant_key, salt, settings.env)
 
+    def get_sub_merchant_id(self, reference_doctype, reference_name):
+        """Get sub-merchant ID for the given reference document."""
+        if not self.enable_sub_merchant:
+            return None
+
+        for row in self.sub_merchant_details:
+            if row.reference_doctype == reference_doctype and row.reference_name == reference_name:
+                return row.merchant_id
+
+        return None
+
     def after_insert(self):
         create_payment_gateway("Easebuzz", "Easebuzz Settings", self.name)
         call_hook_method("payment_gateway_enabled", gateway="Easebuzz")
@@ -54,7 +65,6 @@ class EasebuzzSettings(Document):
             else:
                 self.init_client(surcharge=0)
             split_payments = get_split_payment(fees, payment_request.payment_term)
-            # print(split_payments)
 
             transaction_id = frappe.generate_hash(length=40)
             productinfo = "Payment Request for " + student.first_name
@@ -75,7 +85,6 @@ class EasebuzzSettings(Document):
                 "address2": student.address_line_2,
                 "state": student.state,
                 "country": student.country,
-                "split_payments": split_payments,
                 "show_payment_mode": show_payment_mode,
                 "udf1": f"{doctype}",  # Payment Request Doctype
                 "udf2": f"{docname}",  # Payment Request Docname
@@ -83,7 +92,13 @@ class EasebuzzSettings(Document):
                 "udf4": "",
                 "udf5": "",
             }
-            frappe.logger('ease_settle').exception(postDict)
+            if self.enable_split_payment and split_payments:
+                postDict["split_payments"] = split_payments
+
+            sub_merchant_id = self.get_sub_merchant_id("School", fees.custom_school)
+            if sub_merchant_id:
+                postDict["sub_merchant_id"] = sub_merchant_id
+
             url = self.client.initiatePaymentAPI(postDict)
             return url
         except Exception as e:
@@ -133,7 +148,6 @@ class EasebuzzSettings(Document):
                 "address2": student.address_line_2,
                 "state": student.state,
                 "country": student.country,
-                "split_payments": split_payments,
                 "show_payment_mode": show_payment_mode,
                 "udf1": f"{doctype}",  # Doctype
                 "udf2": f"{docname}",  # Docname
@@ -141,7 +155,14 @@ class EasebuzzSettings(Document):
                 "udf4": "",
                 "udf5": "",
             }
-            frappe.logger("ease_settle").exception(postDict)
+            if self.enable_split_payment and split_payments:
+                postDict["split_payments"] = split_payments
+
+            school = getattr(doc, "custom_school", None) or getattr(doc, "school", None)
+            sub_merchant_id = self.get_sub_merchant_id("School", school) if school else None
+            if sub_merchant_id:
+                postDict["sub_merchant_id"] = sub_merchant_id
+
             url = self.client.initiatePaymentAPI(postDict)
             return url
         except Exception:
@@ -177,7 +198,6 @@ class EasebuzzSettings(Document):
                 "address2": applicant.address_line_2 or "",
                 "state": applicant.state or "",
                 "country": applicant.country or "India",
-                "split_payments": kwargs.get("split_payments", ""),
                 "show_payment_mode": show_payment_mode,
                 "udf1": "Student Applicant",
                 "udf2": applicant_id,
@@ -185,6 +205,15 @@ class EasebuzzSettings(Document):
                 "udf4": "",
                 "udf5": "",
             }
+            split_payments = kwargs.get("split_payments", "")
+            if self.enable_split_payment and split_payments:
+                postDict["split_payments"] = split_payments
+
+            school = getattr(applicant, "custom_school", None) or getattr(applicant, "school", None)
+            sub_merchant_id = self.get_sub_merchant_id("School", school) if school else None
+            if sub_merchant_id:
+                postDict["sub_merchant_id"] = sub_merchant_id
+
             return self.client.initiatePaymentAPI(postDict)
         except Exception as e:
             frappe.log_error(f"Error generating Applicant Payment Link: {str(e)}", frappe.get_traceback())
@@ -350,8 +379,17 @@ class EasebuzzSettings(Document):
             }
             # Process split payments if provided
             split_payments = kwargs.get("split_payments")
-            if split_payments:
+            if self.enable_split_payment and split_payments:
                 post_data["split_payments"] = split_payments
+
+            # Add sub-merchant ID from reference document
+            sub_merchant_id = kwargs.get("sub_merchant_id")
+            if not sub_merchant_id:
+                school = _get_school_from_ref(kwargs.get("reference_doctype"), kwargs.get("reference_docname"))
+                if school:
+                    sub_merchant_id = self.get_sub_merchant_id("School", school)
+            if sub_merchant_id:
+                post_data["sub_merchant_id"] = sub_merchant_id
 
             return self.client.initiatePaymentAPI(post_data)
 
@@ -388,6 +426,21 @@ def get_payment_mode(method):
         "upi": "UPI",
     }
     return payment_methods.get(method.lower()) or ""
+
+
+def _get_school_from_ref(reference_doctype, reference_name):
+    """Get school from reference document, trying common field names."""
+    if not reference_doctype or not reference_name:
+        return None
+    # Fees uses custom_school, Student Applicant uses school
+    for field in ("custom_school", "school"):
+        try:
+            value = frappe.get_cached_value(reference_doctype, reference_name, field)
+            if value:
+                return value
+        except Exception:
+            continue
+    return None
 
 
 def get_surchage():
