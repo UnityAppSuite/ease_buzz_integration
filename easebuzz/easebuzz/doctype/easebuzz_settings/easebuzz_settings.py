@@ -114,10 +114,21 @@ class EasebuzzSettings(Document):
             docname = kwargs.get("reference_docname")
             doc = frappe.get_doc(doctype, docname)
             docname = docname.replace("(", "@").replace(")", "#")
-            student = frappe.get_doc("Student", doc.student)
+
+            student_id = getattr(doc, "student", None)
+            if student_id:
+                payer = frappe.get_doc("Student", student_id)
+                full_name = f"{payer.name} - {payer.student_name}"
+            else:
+                # Pre-enrollment payable (e.g. Student Applicant): the doc itself is the payer.
+                payer = doc
+                last_name = getattr(doc, "last_name", None) or ""
+                display_name = f"{(getattr(doc, 'first_name', '') or '').strip()} {last_name}".strip()
+                full_name = f"{doc.name} - {display_name}" if display_name else doc.name
+
             site_url = frappe.utils.get_url()
             amounts = float(kwargs.get("amount"))
-            title = f"Payment for {doctype} {student.name} - {student.student_name}"
+            title = f"Payment for {doctype} {full_name}"
 
             payment_method = str(kwargs.get("payment_method"))
             show_payment_mode = (
@@ -135,19 +146,19 @@ class EasebuzzSettings(Document):
             transaction_id = frappe.generate_hash(length=40)
             postDict = {
                 "txnid": transaction_id,
-                "firstname": self.process_name(student.first_name),
-                "phone": student.student_mobile_number or "9999999999",
+                "firstname": self.process_name(payer.first_name or ""),
+                "phone": getattr(payer, "student_mobile_number", None) or "9999999999",
                 "email": f"{kwargs.get('payer_email')}",
                 "amount": f"{amounts}",
                 "productinfo": title,
                 "surl": f"{site_url}/easebuzz/success",
                 "furl": f"{site_url}/easebuzz/failure",
-                "city": student.city,
-                "zipcode": student.pincode,
-                "address1": student.address_line_1,
-                "address2": student.address_line_2,
-                "state": student.state,
-                "country": student.country,
+                "city": getattr(payer, "city", None) or "",
+                "zipcode": getattr(payer, "pincode", None) or "",
+                "address1": getattr(payer, "address_line_1", None) or "",
+                "address2": getattr(payer, "address_line_2", None) or "",
+                "state": getattr(payer, "state", None) or "",
+                "country": getattr(payer, "country", None) or "",
                 "show_payment_mode": show_payment_mode,
                 "udf1": f"{doctype}",  # Doctype
                 "udf2": f"{docname}",  # Docname
