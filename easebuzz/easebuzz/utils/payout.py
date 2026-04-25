@@ -1,9 +1,10 @@
 from hashlib import sha512
 
-import requests
 import json
 import re
 import traceback
+
+from .http import post_with_retries
 
 '''
 *
@@ -342,7 +343,7 @@ def _payoutPayment(params_array, salt_key, url):
     params_array['hash'] = hash_key
 
     # requests call for retrive all payout
-    request_result = requests.post(url + 'payout/v1/retrieve', params_array)
+    request_result = post_with_retries(url + 'payout/v1/retrieve', params_array)
     result = json.loads(request_result.content)
 
     return result

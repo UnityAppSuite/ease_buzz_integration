@@ -3,14 +3,9 @@ import frappe
 
 def get_context(context):
     try:
-        if frappe.session.user == "Guest":
-            frappe.set_user("Administrator")
-            data = frappe.form_dict
-            handle_data(data)
-            frappe.set_user("Guest")
-        else:
-            handle_data(data)
+        handle_data(frappe.form_dict)
     except Exception as e:
+        frappe.local.response["http_status_code"] = 400
         frappe.logger("easebuzz").exception(e)
 
 
