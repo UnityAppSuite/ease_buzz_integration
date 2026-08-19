@@ -102,11 +102,10 @@ override_doctype_class = {
 # ---------------
 # Hook on document methods and events
 
-doc_events = {
-	"Easebuzz Settlement Log": {
-		"before_save": "easebuzz.easebuzz.doctype.easebuzz_settlement_log.easebuzz_settlement_log.process_log"
-	}
-}
+# Settlement reconciliation runs from EasebuzzSettlementLog.after_insert, not
+# from a before_save hook -- before_save re-posted the whole settlement on every
+# subsequent save of the log.
+doc_events = {}
 
 # Scheduled Tasks
 # ---------------

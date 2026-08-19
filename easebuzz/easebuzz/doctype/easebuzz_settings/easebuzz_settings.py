@@ -10,6 +10,17 @@ from frappe.utils.data import cint, flt
 from payments.utils.utils import create_payment_gateway
 
 
+# The transaction_type strings Easebuzz sends, paired with the ERPNext Mode of
+# Payment they correspond to.  Matching is done on the string, not the link, so
+# a missing or renamed Mode of Payment record cannot break a rule.
+EASEBUZZ_TRANSACTION_TYPES = (
+    ("UPI", "UPI"),
+    ("Credit Card", "Credit Card"),
+    ("Debit Card", "Debit Card"),
+    ("Netbanking", "Netbanking"),
+)
+
+
 class EasebuzzSettings(Document):
     supported_currencies = ["INR"]
 
@@ -21,7 +32,34 @@ class EasebuzzSettings(Document):
     def after_insert(self):
         create_payment_gateway("Easebuzz", "Easebuzz Settings", self.name)
         call_hook_method("payment_gateway_enabled", gateway="Easebuzz")
-      
+
+    def validate(self):
+        self.validate_payment_mode_rules()
+
+    def validate_payment_mode_rules(self):
+        """Reject duplicate or blank transaction types in the charge rule table.
+
+        Frappe does not enforce uniqueness on child rows, and two rows for the
+        same mode with opposite Debit Charges settings would make the applied
+        rule depend on row order.
+        """
+        seen = {}
+        for row in self.get("allowed_mode_of_payment") or []:
+            key = (row.easebuzz_transaction_type or "").strip()
+            if not key:
+                frappe.throw(
+                    frappe._("Row #{0}: Easebuzz Transaction Type is required.").format(row.idx)
+                )
+            row.easebuzz_transaction_type = key
+            if key in seen:
+                frappe.throw(
+                    frappe._(
+                        "Rows #{0} and #{1} both configure the Easebuzz transaction type "
+                        "'{2}'. Each mode may appear only once."
+                    ).format(seen[key], row.idx, key)
+                )
+            seen[key] = row.idx
+
     def validate_transaction_currency(self, currency):
         if currency not in self.supported_currencies:
             frappe.throw(
@@ -221,6 +259,24 @@ class EasebuzzSettings(Document):
         }
         response = self.client.refundAPI(postDict)
         return response
+
+
+@frappe.whitelist()
+def get_known_transaction_types():
+    """The transaction types Easebuzz is known to report, for the settings form.
+
+    Read-only on purpose: the rows are appended client-side so seeding cannot
+    persist unrelated unsaved edits on the form.
+    """
+    return [
+        {
+            "easebuzz_transaction_type": transaction_type,
+            "mode_of_payment": (
+                mode_of_payment if frappe.db.exists("Mode of Payment", mode_of_payment) else None
+            ),
+        }
+        for transaction_type, mode_of_payment in EASEBUZZ_TRANSACTION_TYPES
+    ]
 
 
 @frappe.whitelist(allow_guest=True)
