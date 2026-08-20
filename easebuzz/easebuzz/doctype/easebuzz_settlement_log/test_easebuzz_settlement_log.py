@@ -7,10 +7,17 @@ import unittest
 from easebuzz.easebuzz.utils.settlement import (
     SettlementError,
     parse_settlement_payload,
+    resolve_charges_account,
     resolve_rule,
     segregate,
     validate_segregation,
 )
+
+
+class _Doc(dict):
+    """Stands in for a Frappe document: attribute and ``.get()`` access."""
+
+    __getattr__ = dict.get
 
 SETTLEMENT = {
     "payout_id": "PTTEST0001",
@@ -153,3 +160,44 @@ class TestSegregation(unittest.TestCase):
     def test_payload_without_split_payouts_is_rejected(self):
         with self.assertRaises(SettlementError):
             segregate({"payout_id": "X", "split_payouts": []}, None, "Debit")
+
+
+class TestChargesAccountResolution(unittest.TestCase):
+    """Company master first, Easebuzz Settings fallback second."""
+
+    def company(self, account=None, name="UESF"):
+        return _Doc(name=name, custom_easebuzz_charges=account)
+
+    def settings(self, *rows):
+        return _Doc(company_charge_accounts=[_Doc(**row) for row in rows])
+
+    def test_company_master_wins(self):
+        settings = self.settings(
+            {"company": "UESF", "charges_account": "Fallback - UESF"},
+        )
+        account = resolve_charges_account(self.company("Easebuzz Charges - UESF"), settings)
+        self.assertEqual(account, "Easebuzz Charges - UESF")
+
+    def test_falls_back_to_settings_table(self):
+        settings = self.settings(
+            {"company": "RESPL", "charges_account": "Easebuzz Charges - RESPL"},
+            {"company": "UESF", "charges_account": "Easebuzz Charges - UESF"},
+        )
+        self.assertEqual(
+            resolve_charges_account(self.company(), settings), "Easebuzz Charges - UESF"
+        )
+
+    def test_other_companies_rows_are_not_used(self):
+        settings = self.settings({"company": "RESPL", "charges_account": "Easebuzz Charges - RESPL"})
+        self.assertIsNone(resolve_charges_account(self.company(), settings))
+
+    def test_blank_row_account_is_not_used(self):
+        settings = self.settings({"company": "UESF", "charges_account": None})
+        self.assertIsNone(resolve_charges_account(self.company(), settings))
+
+    def test_no_settings_record_at_all(self):
+        self.assertIsNone(resolve_charges_account(self.company(), None))
+        self.assertEqual(
+            resolve_charges_account(self.company("Easebuzz Charges - UESF"), None),
+            "Easebuzz Charges - UESF",
+        )

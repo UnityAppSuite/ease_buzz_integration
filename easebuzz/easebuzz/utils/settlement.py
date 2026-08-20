@@ -224,6 +224,30 @@ def get_company_accounts(company):
     return doc
 
 
+def resolve_charges_account(company_doc, settings=None):
+    """Return the expense account this company's Easebuzz charges are debited to.
+
+    The Company master wins, so a company Finance has already configured keeps
+    posting where they put it.  The ``Company Charge Accounts`` table on Easebuzz
+    Settings is the fallback: a company that starts settling before anyone fills
+    in its Company field should not fail the whole payload.
+
+    Returns ``None`` when neither is set -- the caller decides whether that
+    matters, because a settlement whose charges are all skipped by payment-mode
+    rules needs no charges account at all.
+    """
+    account = company_doc.get("custom_easebuzz_charges")
+    if account:
+        return account
+
+    rows = settings.get("company_charge_accounts") if settings is not None else None
+    for row in rows or []:
+        if row.get("company") == company_doc.name and row.get("charges_account"):
+            return row.get("charges_account")
+
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Segregation
 # --------------------------------------------------------------------------- #
@@ -407,7 +431,7 @@ def build_remark(payload, log_name, bucket, currency=None):
     return "\n".join(lines)
 
 
-def build_journal_entry(payload, log_name, bucket, precision):
+def build_journal_entry(payload, log_name, bucket, precision, settings=None):
     """Build one balanced Journal Entry for a single company.
 
     Every line is rounded to currency precision first and the suspense credit is
@@ -416,12 +440,15 @@ def build_journal_entry(payload, log_name, bucket, precision):
     """
     company_doc = get_company_accounts(bucket["company"])
     charges = flt(bucket["included"], precision)
+    charges_account = resolve_charges_account(company_doc, settings) if charges else None
 
-    if charges and not company_doc.get("custom_easebuzz_charges"):
+    if charges and not charges_account:
         raise SettlementError(
             _(
-                "Company {0} has no Easebuzz Charges account (custom_easebuzz_charges) set, "
-                "but this settlement carries {1} of charges to debit."
+                "Company {0} has no Easebuzz Charges account, but this settlement carries "
+                "{1} of charges to debit. Set Easebuzz Charges on the Company, or add a row "
+                "for {0} under Easebuzz Charges Accounts in Easebuzz Settings -- the settings "
+                "form can create the account for you."
             ).format(bucket["company"], charges)
         )
 
@@ -467,7 +494,7 @@ def build_journal_entry(payload, log_name, bucket, precision):
         total_debit = flt(total_debit + charges, precision)
         accounts.append(
             {
-                "account": company_doc.custom_easebuzz_charges,
+                "account": charges_account,
                 "cost_center": cost_center,
                 "debit_in_account_currency": charges,
                 "debit": charges,
@@ -594,7 +621,7 @@ def process_settlement_log(name, force=False):
     # so the already_posted check and the insert cannot interleave.
     with filelock(f"easebuzz-settlement-{payload['payout_id']}", timeout=600):
         failures, held_for_review = _post_companies(
-            doc, payload, result, auto_submit, precision, name
+            doc, payload, result, auto_submit, precision, name, settings
         )
 
     if failures:
@@ -608,7 +635,7 @@ def process_settlement_log(name, force=False):
     return _finish(doc, "Processed", None)
 
 
-def _post_companies(doc, payload, result, auto_submit, precision, name):
+def _post_companies(doc, payload, result, auto_submit, precision, name, settings=None):
     """Create one Journal Entry per company, isolating each company's failure."""
     failures = []
     held_for_review = False
@@ -635,7 +662,7 @@ def _post_companies(doc, payload, result, auto_submit, precision, name):
         save_point = f"easebuzz_settlement_{index}"
         frappe.db.savepoint(save_point)
         try:
-            je, _total = build_journal_entry(payload, doc.name, bucket, precision)
+            je, _total = build_journal_entry(payload, doc.name, bucket, precision, settings)
             je.insert(ignore_permissions=True)
 
             submit = auto_submit and not is_first_settlement_for_company(company)
