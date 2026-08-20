@@ -7,9 +7,15 @@ from frappe.model.document import Document
 
 from easebuzz.easebuzz.utils.settlement import (
     get_reconciliation_settings,
+    logger,
     parse_settlement_payload,
     process_settlement_log,
 )
+
+# Saving a log in one of these states starts (or retries) reconciliation.
+# "Processed", "Processing", "Needs Review" and "Skipped" are left alone -- those
+# either already posted or are waiting on a person, so re-saving must not refire.
+AUTO_PROCESS_STATUSES = ("", "Pending", "Failed")
 
 
 class EasebuzzSettlementLog(Document):
@@ -25,45 +31,88 @@ class EasebuzzSettlementLog(Document):
         if payload.get("payout_date"):
             self.payout_date = frappe.utils.getdate(payload.get("payout_date"))
 
+    def on_update(self):
+        """Reconcile whenever the log is saved, insert included.
+
+        ``on_update`` fires on both insert and subsequent saves, so this is the
+        single trigger.  Re-running is safe: an already-posted
+        (payout_id, company) pair is recorded as Already Posted rather than
+        posted twice, which is what the original ``before_save`` hook lacked.
+        """
+        if self.flags.easebuzz_reconciling:
+            # We are inside the save that process_settlement_log itself performs.
+            return
+        if (self.status or "") not in AUTO_PROCESS_STATUSES:
+            return
+        self.queue_reconciliation()
+
     @frappe.whitelist()
     def process_log(self, force=False):
-        """Reconcile this log now, from the form or from the console.
-
-        Kept as a document method because the reconciliation branch exposes it
-        that way; the real work lives in ``utils.settlement``.
-        """
+        """Reconcile this log now, from the form or from the console."""
         self.check_permission("write")
         return process_settlement_log(self.name, force=force)
 
-    def after_insert(self):
-        """Queue reconciliation.
+    def queue_reconciliation(self):
+        """Hand the log to a worker, or run it after commit if there is none.
 
-        Enqueued rather than run inline: a settlement carries up to 17 bank
-        splits and ~90 transactions, which is too much for the webhook request.
-        Runs on insert only -- on ``before_save`` it would re-post on every
-        subsequent save of the log.
+        Nothing in here may raise.  The gateway posts each settlement once, so
+        an unreachable queue or a broken settings record must leave a Pending
+        log to retry from -- never abort the insert and lose the payload.
         """
         try:
             settings = get_reconciliation_settings()
         except Exception as exc:
-            # The gateway posts this payload once.  An ambiguous or broken
-            # settings record must leave a Pending log to retry from, never
-            # abort the insert and lose the settlement.
-            frappe.logger("easebuzz", allow_site=True).error(
-                f"Easebuzz Settlement Log {self.name}: cannot resolve settings: {exc}"
+            self._note(_("Cannot resolve Easebuzz Settings: {0}").format(exc))
+            return
+
+        if not settings:
+            self._note(_("No Easebuzz Settings record exists, so reconciliation is off."))
+            return
+        if not settings.get("auto_create_journal_entry"):
+            self._note(
+                _("Auto Create Journal Entry is off in Easebuzz Settings ({0}).").format(
+                    settings.name
+                )
             )
             return
 
-        if not settings or not settings.get("auto_create_journal_entry"):
-            return
+        name = self.name
+        try:
+            frappe.enqueue(
+                process_settlement_log,
+                queue="long",
+                enqueue_after_commit=True,
+                job_id=f"easebuzz-settlement-{name}",
+                deduplicate=True,
+                name=name,
+            )
+            self._note(None)
+        except Exception as exc:
+            # No Redis or no worker.  Fall back to running after the current
+            # transaction commits, which keeps it out of this save cycle.
+            logger().warning(
+                f"Easebuzz Settlement Log {name}: queue unavailable ({exc}); "
+                "reconciling inline after commit"
+            )
+            self._note(None)
+            frappe.db.after_commit.add(lambda: _reconcile_inline(name))
 
-        frappe.enqueue(
-            process_settlement_log,
-            queue="long",
-            enqueue_after_commit=True,
-            job_id=f"easebuzz-settlement-{self.name}",
-            deduplicate=True,
-            name=self.name,
+    def _note(self, message):
+        """Record why reconciliation did or did not start, without rerunning hooks."""
+        if (self.error_message or None) == (message or None):
+            return
+        self.error_message = message
+        self.db_set("error_message", message, update_modified=False)
+
+
+def _reconcile_inline(name):
+    """Run reconciliation outside the save cycle; never let it escape."""
+    try:
+        process_settlement_log(name)
+    except Exception:
+        logger().error(
+            f"Easebuzz Settlement Log {name}: inline reconciliation failed\n"
+            f"{frappe.get_traceback()}"
         )
 
 

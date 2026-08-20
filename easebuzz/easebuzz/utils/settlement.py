@@ -703,6 +703,9 @@ def _finish(doc, status, message):
     """
     doc.status = status
     doc.error_message = message
+    # Tells EasebuzzSettlementLog.on_update that this save is ours, so saving the
+    # outcome does not start another round of reconciliation.
+    doc.flags.easebuzz_reconciling = True
     doc.save(ignore_permissions=True)
     frappe.db.commit()
     return status

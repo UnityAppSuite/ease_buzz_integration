@@ -102,9 +102,10 @@ override_doctype_class = {
 # ---------------
 # Hook on document methods and events
 
-# Settlement reconciliation runs from EasebuzzSettlementLog.after_insert, not
-# from a before_save hook -- before_save re-posted the whole settlement on every
-# subsequent save of the log.
+# Settlement reconciliation runs from EasebuzzSettlementLog.on_update, which
+# fires on insert and on every later save.  It is not a before_save hook: that
+# ran before the row existed and had no idempotency, so it re-posted the whole
+# settlement on every save.
 doc_events = {}
 
 # Scheduled Tasks
