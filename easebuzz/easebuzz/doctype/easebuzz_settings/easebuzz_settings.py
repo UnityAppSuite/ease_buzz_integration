@@ -3,7 +3,6 @@
 
 import json
 import frappe
-from frappe.auth import LoginManager
 from frappe.model.document import Document
 from easebuzz.easebuzz.utils.easebuzz_payment_gateway import Easebuzz
 from frappe.utils import call_hook_method
@@ -267,11 +266,10 @@ class EasebuzzSettings(Document):
         """
         Handle the response from the Easebuzz payment gateway
         """
+        session_user = frappe.session.user
         try:
-            # TODO: need to create a new user for this purpose
-            login_manager = LoginManager()
-            login_manager.login_as("Administrator")
-            
+            frappe.set_user("Administrator")
+
             # Extract and validate required data
             doctype = data.get("udf1")
             docname = self.format_data(data.get("udf2"), reverse=True)
@@ -314,11 +312,11 @@ class EasebuzzSettings(Document):
             
             return {"message": "Payment Successful"}
             
-        except Exception as e:
+        except Exception:
             frappe.log_error("Error in handle_response", frappe.get_traceback())
             return {"message": "Payment processing failed"}
         finally:
-            login_manager.logout()
+            frappe.set_user(session_user)
 
     def handle_response_web_form(self, data):
         doctype = data.get("udf1")
