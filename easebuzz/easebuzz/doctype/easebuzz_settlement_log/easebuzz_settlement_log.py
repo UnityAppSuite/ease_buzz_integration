@@ -50,52 +50,42 @@ class EasebuzzSettlementLog(Document):
     def process_log(self, force=False):
         """Reconcile this log now, from the form or from the console."""
         self.check_permission("write")
+        force = frappe.utils.sbool(force)
         return process_settlement_log(self.name, force=force)
 
     def queue_reconciliation(self):
-        """Hand the log to a worker, or run it after commit if there is none.
+        """Automatically reconcile this settlement after the save commits."""
 
-        Nothing in here may raise.  The gateway posts each settlement once, so
-        an unreachable queue or a broken settings record must leave a Pending
-        log to retry from -- never abort the insert and lose the payload.
-        """
         try:
             settings = get_reconciliation_settings()
         except Exception as exc:
-            self._note(_("Cannot resolve Easebuzz Settings: {0}").format(exc))
+            self._note(
+                _("Cannot resolve Easebuzz Settings: {0}").format(exc)
+            )
             return
 
         if not settings:
-            self._note(_("No Easebuzz Settings record exists, so reconciliation is off."))
+            self._note(
+                _("No Easebuzz Settings record exists, so reconciliation is off.")
+            )
             return
+
         if not settings.get("auto_create_journal_entry"):
             self._note(
                 _("Auto Create Journal Entry is off in Easebuzz Settings ({0}).").format(
-                    settings.name
+                    settings.get("name") or _("Unknown")
                 )
             )
             return
 
         name = self.name
-        try:
-            frappe.enqueue(
-                process_settlement_log,
-                queue="long",
-                enqueue_after_commit=True,
-                job_id=f"easebuzz-settlement-{name}",
-                deduplicate=True,
-                name=name,
-            )
-            self._note(None)
-        except Exception as exc:
-            # No Redis or no worker.  Fall back to running after the current
-            # transaction commits, which keeps it out of this save cycle.
-            logger().warning(
-                f"Easebuzz Settlement Log {name}: queue unavailable ({exc}); "
-                "reconciling inline after commit"
-            )
-            self._note(None)
-            frappe.db.after_commit.add(lambda: _reconcile_inline(name))
+        self._note(None)
+
+        # Execute only after the Settlement Log save is committed.
+        # This does not depend on Redis or background workers.
+        frappe.db.after_commit.add(
+            lambda log_name=name: _reconcile_inline(log_name)
+        )
 
     def _note(self, message):
         """Record why reconciliation did or did not start, without rerunning hooks."""
@@ -106,24 +96,68 @@ class EasebuzzSettlementLog(Document):
 
 
 def _reconcile_inline(name):
-    """Run reconciliation outside the save cycle; never let it escape."""
+    """Process and commit reconciliation after the Settlement Log save."""
+
     try:
-        process_settlement_log(name)
+        result = process_settlement_log(name)
+
+        # The original document save was already committed before this callback.
+        # Commit the Journal Entry and Settlement Log status changes separately.
+        frappe.db.commit()
+
+        return result
+
     except Exception:
+        traceback = frappe.get_traceback()
+
+        # Discard any partially created Journal Entry or accounting rows.
+        frappe.db.rollback()
+
         logger().error(
-            f"Easebuzz Settlement Log {name}: inline reconciliation failed\n"
-            f"{frappe.get_traceback()}"
+            f"Easebuzz Settlement Log {name}: "
+            f"automatic reconciliation failed\n{traceback}"
         )
+
+        try:
+            frappe.db.set_value(
+                "Easebuzz Settlement Log",
+                name,
+                {
+                    "status": "Failed",
+                    "error_message": traceback,
+                },
+                update_modified=False,
+            )
+            frappe.db.commit()
+
+        except Exception:
+            failure_traceback = frappe.get_traceback()
+            frappe.db.rollback()
+
+            logger().error(
+                f"Easebuzz Settlement Log {name}: "
+                f"unable to record failure\n{failure_traceback}"
+            )
 
 
 @frappe.whitelist()
 def process_log(docname=None, doc=None, method=None, force=False):
-    """Process a settlement log on demand, from the form or from the console."""
+    """Process a settlement log on demand, from the form or console."""
     name = docname
+
     if not name and doc is not None:
         name = doc if isinstance(doc, str) else doc.name
+
     if not name:
         frappe.throw(_("No Easebuzz Settlement Log specified."))
 
-    frappe.has_permission("Easebuzz Settlement Log", "write", doc=name, throw=True)
+    frappe.has_permission(
+        "Easebuzz Settlement Log",
+        "write",
+        doc=name,
+        throw=True,
+    )
+
+    force = frappe.utils.sbool(force)
+
     return process_settlement_log(name, force=force)
