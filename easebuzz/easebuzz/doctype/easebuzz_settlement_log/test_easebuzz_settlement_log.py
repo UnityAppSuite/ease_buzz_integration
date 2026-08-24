@@ -3,9 +3,11 @@
 
 import json
 import unittest
+from unittest.mock import patch
 
 from easebuzz.easebuzz.utils.settlement import (
     SettlementError,
+    get_reconciliation_settings,
     parse_settlement_payload,
     resolve_charges_account,
     resolve_rule,
@@ -18,6 +20,10 @@ class _Doc(dict):
     """Stands in for a Frappe document: attribute and ``.get()`` access."""
 
     __getattr__ = dict.get
+
+    def __setattr__(self, key, value):
+        self[key] = value
+
 
 SETTLEMENT = {
     "payout_id": "PTTEST0001",
@@ -87,6 +93,39 @@ class TestSettlementPayloadParsing(unittest.TestCase):
         for bad in (None, "", "   ", "not a payload"):
             with self.assertRaises(SettlementError):
                 parse_settlement_payload(bad)
+
+
+class TestReconciliationSettings(unittest.TestCase):
+    def test_any_enabled_record_enables_site_and_auto_submit(self):
+        records = [
+            _Doc(name="recent", auto_create_journal_entry=1, auto_submit_journal_entry=0),
+            _Doc(name="older", auto_create_journal_entry=1, auto_submit_journal_entry=1),
+        ]
+        selected = _Doc(name="recent")
+
+        with patch("easebuzz.easebuzz.utils.settlement.frappe.get_all", return_value=records), patch(
+            "easebuzz.easebuzz.utils.settlement.frappe.get_doc", return_value=selected
+        ) as get_doc:
+            settings = get_reconciliation_settings()
+
+        get_doc.assert_called_once_with("Easebuzz Settings", "recent")
+        self.assertTrue(settings.auto_create_journal_entry)
+        self.assertTrue(settings.auto_submit_journal_entry)
+
+    def test_all_disabled_records_keep_automation_off(self):
+        records = [
+            _Doc(name="recent", auto_create_journal_entry=0, auto_submit_journal_entry=1),
+            _Doc(name="older", auto_create_journal_entry=0, auto_submit_journal_entry=0),
+        ]
+        selected = _Doc(name="recent")
+
+        with patch("easebuzz.easebuzz.utils.settlement.frappe.get_all", return_value=records), patch(
+            "easebuzz.easebuzz.utils.settlement.frappe.get_doc", return_value=selected
+        ):
+            settings = get_reconciliation_settings()
+
+        self.assertFalse(settings.auto_create_journal_entry)
+        self.assertFalse(settings.auto_submit_journal_entry)
 
 
 class TestModeRules(unittest.TestCase):

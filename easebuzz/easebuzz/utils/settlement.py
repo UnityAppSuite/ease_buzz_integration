@@ -94,37 +94,38 @@ def _loads(text):
 # --------------------------------------------------------------------------- #
 
 def get_reconciliation_settings():
-    """Resolve the Easebuzz Settings record that owns the reconciliation config.
+    """Resolve the site-wide settlement reconciliation configuration.
 
     ``Easebuzz Settings`` is not a Single -- it is named by ``easebuzz_account``
-    and a site may hold several.  ``frappe.get_last_doc`` would pick whichever
-    was created last, which makes the applied rules invisible.  Resolve
-    deterministically instead: prefer the single record that has reconciliation
-    switched on, and refuse to guess when that is ambiguous.
+    and a site may hold several (for example, separate surcharge gateways).  A
+    settlement callback does not carry the originating settings name, so the
+    automation switches must apply across those records: enabling Auto Create
+    on any record enables it for incoming logs, and Auto Submit is enabled when
+    it is checked on any Auto-Create-enabled record.
+
+    The most recently modified enabled record supplies the detailed rules. This
+    makes the form the user just configured authoritative without rejecting a
+    perfectly valid site merely because another gateway is also enabled.
     """
-    names = frappe.get_all("Easebuzz Settings", pluck="name", order_by="name")
-    if not names:
-        return None
-    if len(names) == 1:
-        return frappe.get_cached_doc("Easebuzz Settings", names[0])
-
-    enabled = frappe.get_all(
+    records = frappe.get_all(
         "Easebuzz Settings",
-        filters={"auto_create_journal_entry": 1},
-        pluck="name",
-        order_by="name",
+        fields=["name", "auto_create_journal_entry", "auto_submit_journal_entry"],
+        order_by="modified desc, name asc",
     )
-    if len(enabled) == 1:
-        return frappe.get_cached_doc("Easebuzz Settings", enabled[0])
-    if not enabled:
+    if not records:
         return None
 
-    raise SettlementError(
-        _(
-            "{0} Easebuzz Settings records have Auto Create Journal Entry enabled ({1}). "
-            "Enable it on exactly one record so the applied charge rules are traceable."
-        ).format(len(enabled), ", ".join(enabled))
+    enabled = [row for row in records if row.auto_create_journal_entry]
+    selected = enabled[0] if enabled else records[0]
+    settings = frappe.get_doc("Easebuzz Settings", selected.name)
+
+    # get_doc returns an uncached document, so these effective site-wide values
+    # do not pollute Frappe's document cache.
+    settings.auto_create_journal_entry = bool(enabled)
+    settings.auto_submit_journal_entry = any(
+        row.auto_submit_journal_entry for row in enabled
     )
+    return settings
 
 
 def load_mode_rules(settings):
@@ -396,23 +397,6 @@ def already_posted(payout_id, company):
     return None
 
 
-def is_first_settlement_for_company(company):
-    """True until a settlement JE for this company has been submitted.
-
-    The first JE per company is held as Draft so the mapping can be confirmed
-    before anything posts to the ledger.
-    """
-    rows = frappe.get_all(
-        "Easebuzz Settlement Reconciliation",
-        filters={"company": company, "journal_entry": ("is", "set")},
-        pluck="journal_entry",
-    )
-    for name in rows:
-        if frappe.db.get_value("Journal Entry", name, "docstatus") == 1:
-            return False
-    return True
-
-
 def build_remark(payload, log_name, bucket, currency=None):
     lines = [
         _("Easebuzz Settlement {0}").format(payload.get("payout_id")),
@@ -665,7 +649,7 @@ def _post_companies(doc, payload, result, auto_submit, precision, name, settings
             je, _total = build_journal_entry(payload, doc.name, bucket, precision, settings)
             je.insert(ignore_permissions=True)
 
-            submit = auto_submit and not is_first_settlement_for_company(company)
+            submit = auto_submit
             if submit:
                 je.submit()
             else:

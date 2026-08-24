@@ -65,16 +65,12 @@ class EasebuzzSettlementLog(Document):
             self._note(_("Cannot resolve Easebuzz Settings: {0}").format(exc))
             return
 
-        # A site with no Easebuzz Settings record at all has not configured
-        # reconciliation, and process_settlement_log falls back to defaults --
-        # which is why the Process button posts fine without one.  Saving has
-        # to behave the same way, or the button and the automatic trigger
-        # disagree about the same payload.  Only an explicit "off" stops us.
-        if settings and not settings.get("auto_create_journal_entry"):
+        if not settings:
+            self._note(_("No Easebuzz Settings record exists, so reconciliation is off."))
+            return
+        if not settings.get("auto_create_journal_entry"):
             self._note(
-                _("Auto Create Journal Entry is off in Easebuzz Settings ({0}).").format(
-                    settings.name
-                )
+                _("Auto Create Journal Entry is off in all Easebuzz Settings records.")
             )
             return
 

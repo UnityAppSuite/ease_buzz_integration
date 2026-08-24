@@ -62,7 +62,7 @@
   },
   {
    "default": "0",
-   "description": "Create the settlement Journal Entry automatically when an Easebuzz Settlement Log is inserted. Off = logs are stored with status Pending and can be processed manually from the log.",
+   "description": "Create settlement Journal Entries automatically when an Easebuzz Settlement Log is inserted. Enabling this on any Easebuzz Settings record enables automation for the site. If it is off on every record, logs remain Pending and can be processed manually.",
    "fieldname": "auto_create_journal_entry",
    "fieldtype": "Check",
    "label": "Auto Create Journal Entry"
@@ -70,7 +70,7 @@
   {
    "default": "0",
    "depends_on": "auto_create_journal_entry",
-   "description": "Off = every Journal Entry is left as Draft and the log is marked Needs Review. The first settlement for a company is ALWAYS left as Draft regardless of this setting.",
+   "description": "Submit automatically created Journal Entries. If this is enabled on any settings record where Auto Create is enabled, all settlement Journal Entries are submitted; otherwise they remain Draft for review.",
    "fieldname": "auto_submit_journal_entry",
    "fieldtype": "Check",
    "label": "Auto Submit Journal Entry"

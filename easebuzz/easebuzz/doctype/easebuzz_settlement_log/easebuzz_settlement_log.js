@@ -12,7 +12,25 @@ const STATUS_COLOUR = {
 
 frappe.ui.form.on("Easebuzz Settlement Log", {
 	refresh(frm) {
+		clearTimeout(frm.easebuzz_refresh_timer);
 		if (frm.is_new()) return;
+
+		// Automatic reconciliation runs just after the log's original save has
+		// committed. The save response can therefore still contain Pending or
+		// Processing even though the server is already working on it. Poll while
+		// it is active so status, errors and reconciliation rows appear without a
+		// manual browser refresh.
+		const is_active =
+			frm.doc.status === "Processing" ||
+			(frm.doc.status === "Pending" && !frm.doc.error_message);
+		if (is_active) {
+			frm.easebuzz_refresh_attempts = (frm.easebuzz_refresh_attempts || 0) + 1;
+			if (frm.easebuzz_refresh_attempts <= 60) {
+				frm.easebuzz_refresh_timer = setTimeout(() => frm.reload_doc(), 2000);
+			}
+		} else {
+			frm.easebuzz_refresh_attempts = 0;
+		}
 
 		if (frm.doc.status) {
 			frm.page.set_indicator(__(frm.doc.status), STATUS_COLOUR[frm.doc.status] || "gray");
