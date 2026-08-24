@@ -10,6 +10,21 @@ from frappe.utils.data import cint, flt
 from payments.utils.utils import create_payment_gateway
 
 
+# The transaction_type strings Easebuzz sends, paired with the ERPNext Mode of
+# Payment they correspond to.  Matching is done on the string, not the link, so
+# a missing or renamed Mode of Payment record cannot break a rule.
+# Name used when the settings form creates a missing charges ledger.  ERPNext
+# appends the company abbreviation, so this becomes "Easebuzz Charges - UESF".
+DEFAULT_CHARGE_ACCOUNT_NAME = "Easebuzz Charges"
+
+EASEBUZZ_TRANSACTION_TYPES = (
+    ("UPI", "UPI"),
+    ("Credit Card", "Credit Card"),
+    ("Debit Card", "Debit Card"),
+    ("Netbanking", "Netbanking"),
+)
+
+
 class EasebuzzSettings(Document):
     supported_currencies = ["INR"]
 
@@ -21,7 +36,84 @@ class EasebuzzSettings(Document):
     def after_insert(self):
         create_payment_gateway("Easebuzz", "Easebuzz Settings", self.name)
         call_hook_method("payment_gateway_enabled", gateway="Easebuzz")
-      
+
+    def validate(self):
+        self.validate_payment_mode_rules()
+        self.validate_company_charge_accounts()
+
+    def validate_payment_mode_rules(self):
+        """Reject duplicate or blank transaction types in the charge rule table.
+
+        Frappe does not enforce uniqueness on child rows, and two rows for the
+        same mode with opposite Debit Charges settings would make the applied
+        rule depend on row order.
+        """
+        seen = {}
+        for row in self.get("allowed_mode_of_payment") or []:
+            key = (row.easebuzz_transaction_type or "").strip()
+            if not key:
+                frappe.throw(
+                    frappe._("Row #{0}: Easebuzz Transaction Type is required.").format(row.idx)
+                )
+            row.easebuzz_transaction_type = key
+            if key in seen:
+                frappe.throw(
+                    frappe._(
+                        "Rows #{0} and #{1} both configure the Easebuzz transaction type "
+                        "'{2}'. Each mode may appear only once."
+                    ).format(seen[key], row.idx, key)
+                )
+            seen[key] = row.idx
+
+    def validate_company_charge_accounts(self):
+        """Keep the fallback table unambiguous and postable.
+
+        A second row for the same company would make the account that gets
+        debited depend on row order, and an account belonging to another company
+        would only surface as an ERPNext error deep inside a settlement job.
+        """
+        seen = {}
+        for row in self.get("company_charge_accounts") or []:
+            if row.company in seen:
+                frappe.throw(
+                    frappe._(
+                        "Rows #{0} and #{1} both configure a charges account for {2}. "
+                        "Each company may appear only once."
+                    ).format(seen[row.company], row.idx, row.company)
+                )
+            seen[row.company] = row.idx
+
+            account = frappe.db.get_value(
+                "Account",
+                row.charges_account,
+                ["company", "is_group", "root_type"],
+                as_dict=True,
+            )
+            if not account:
+                frappe.throw(
+                    frappe._("Row #{0}: Account {1} does not exist.").format(
+                        row.idx, row.charges_account
+                    )
+                )
+            if account.company != row.company:
+                frappe.throw(
+                    frappe._(
+                        "Row #{0}: Account {1} belongs to {2}, not to {3}."
+                    ).format(row.idx, row.charges_account, account.company, row.company)
+                )
+            if account.is_group:
+                frappe.throw(
+                    frappe._(
+                        "Row #{0}: {1} is a group account. Charges must be debited to a ledger."
+                    ).format(row.idx, row.charges_account)
+                )
+            if account.root_type != "Expense":
+                frappe.throw(
+                    frappe._(
+                        "Row #{0}: {1} is {2}, not an Expense account."
+                    ).format(row.idx, row.charges_account, account.root_type)
+                )
+
     def validate_transaction_currency(self, currency):
         if currency not in self.supported_currencies:
             frappe.throw(
@@ -220,6 +312,148 @@ class EasebuzzSettings(Document):
         }
         response = self.client.refundAPI(postDict)
         return response
+
+
+@frappe.whitelist()
+def get_known_transaction_types():
+    """The transaction types Easebuzz is known to report, for the settings form.
+
+    Read-only on purpose: the rows are appended client-side so seeding cannot
+    persist unrelated unsaved edits on the form.
+    """
+    return [
+        {
+            "easebuzz_transaction_type": transaction_type,
+            "mode_of_payment": (
+                mode_of_payment if frappe.db.exists("Mode of Payment", mode_of_payment) else None
+            ),
+        }
+        for transaction_type, mode_of_payment in EASEBUZZ_TRANSACTION_TYPES
+    ]
+
+
+@frappe.whitelist()
+def get_charge_account_status():
+    """Report where each settling company's Easebuzz charges would be debited.
+
+    A company settles through Easebuzz when it has a PG suspense account, so
+    that is what defines "participating" -- the reconciliation never touches a
+    company without one.  For each, report the account that
+    ``resolve_charges_account`` would pick and, when there is none, the existing
+    account that looks like the right one so the user links it instead of
+    creating a second charges GL.
+    """
+    settings_rows = {}
+    for name in frappe.get_all("Easebuzz Settings", pluck="name"):
+        for row in frappe.get_all(
+            "Easebuzz Company Charge Account",
+            filters={"parent": name, "parenttype": "Easebuzz Settings"},
+            fields=["company", "charges_account"],
+        ):
+            settings_rows.setdefault(row.company, row.charges_account)
+
+    companies = frappe.get_all(
+        "Company",
+        filters={"default_easebuzz_account": ("is", "set")},
+        fields=["name", "abbr", "custom_easebuzz_charges"],
+        order_by="name",
+    )
+
+    status = []
+    for company in companies:
+        account = company.custom_easebuzz_charges
+        source = "Company" if account else None
+        if not account:
+            account = settings_rows.get(company.name)
+            source = "Easebuzz Settings" if account else None
+
+        status.append(
+            {
+                "company": company.name,
+                "account": account,
+                "source": source,
+                "suggested_account_name": DEFAULT_CHARGE_ACCOUNT_NAME,
+                "suggested_parent": account or find_expense_parent(company.name),
+                "candidates": [] if account else find_charge_account_candidates(company.name),
+            }
+        )
+    return status
+
+
+def find_charge_account_candidates(company):
+    """Ledger expense accounts of this company that already look like the one."""
+    return frappe.get_all(
+        "Account",
+        filters={
+            "company": company,
+            "is_group": 0,
+            "root_type": "Expense",
+            "account_name": ("like", "%Easebuzz%"),
+        },
+        pluck="name",
+        order_by="name",
+    )
+
+
+def find_expense_parent(company):
+    """The group account a new Easebuzz charges ledger should sit under."""
+    for account_name in ("Indirect Expenses", "Expenses"):
+        parent = frappe.db.get_value(
+            "Account",
+            {"company": company, "account_name": account_name, "is_group": 1},
+            "name",
+        )
+        if parent:
+            return parent
+
+    return frappe.db.get_value(
+        "Account",
+        {"company": company, "root_type": "Expense", "is_group": 1, "parent_account": ("is", "not set")},
+        "name",
+    )
+
+
+@frappe.whitelist()
+def create_charge_account(company, account_name=None, parent_account=None):
+    """Create the Easebuzz charges ledger for a company, or return the existing one.
+
+    Called from the settings form when a company has no charges account, so the
+    settlement does not have to be re-run against a half-configured chart of
+    accounts.  Never creates a second ledger with the same name.
+    """
+    frappe.has_permission("Account", "create", throw=True)
+
+    account_name = (account_name or DEFAULT_CHARGE_ACCOUNT_NAME).strip()
+    existing = frappe.db.get_value(
+        "Account",
+        {"company": company, "account_name": account_name, "is_group": 0},
+        "name",
+    )
+    if existing:
+        return {"account": existing, "created": False}
+
+    parent_account = parent_account or find_expense_parent(company)
+    if not parent_account:
+        frappe.throw(
+            frappe._(
+                "{0} has no expense group account to create {1} under. "
+                "Create the account manually and select it here."
+            ).format(company, account_name)
+        )
+
+    account = frappe.get_doc(
+        {
+            "doctype": "Account",
+            "account_name": account_name,
+            "company": company,
+            "parent_account": parent_account,
+            "root_type": "Expense",
+            "report_type": "Profit and Loss",
+            "is_group": 0,
+        }
+    ).insert()
+
+    return {"account": account.name, "created": True}
 
 
 @frappe.whitelist(allow_guest=True)

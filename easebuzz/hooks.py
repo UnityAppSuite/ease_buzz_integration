@@ -102,11 +102,11 @@ override_doctype_class = {
 # ---------------
 # Hook on document methods and events
 
-doc_events = {
-	"Easebuzz Settlement Log": {
-		"before_save": "easebuzz.easebuzz.doctype.easebuzz_settlement_log.easebuzz_settlement_log.process_log"
-	}
-}
+# Settlement reconciliation runs from EasebuzzSettlementLog.on_update, which
+# fires on insert and on every later save.  It is not a before_save hook: that
+# ran before the row existed and had no idempotency, so it re-posted the whole
+# settlement on every save.
+doc_events = {}
 
 # Scheduled Tasks
 # ---------------

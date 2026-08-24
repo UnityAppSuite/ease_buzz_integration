@@ -12,7 +12,19 @@
   "merchant_key",
   "salt",
   "env",
-  "surcharge"
+  "surcharge",
+  "reconciliation_section",
+  "auto_create_journal_entry",
+  "auto_submit_journal_entry",
+  "reconciliation_start_date",
+  "column_break_recon",
+  "charge_tolerance",
+  "enable_payment_mode_rules",
+  "unknown_mode_behaviour",
+  "charge_accounts_section",
+  "company_charge_accounts",
+  "payment_mode_rules_section",
+  "allowed_mode_of_payment"
  ],
  "fields": [
   {
@@ -42,11 +54,90 @@
    "fieldtype": "Data",
    "label": "Easebuzz Account",
    "unique": 1
+  },
+  {
+   "fieldname": "reconciliation_section",
+   "fieldtype": "Section Break",
+   "label": "Settlement Reconciliation"
+  },
+  {
+   "default": "0",
+   "description": "Create settlement Journal Entries automatically when an Easebuzz Settlement Log is inserted. Enabling this on any Easebuzz Settings record enables automation for the site. If it is off on every record, logs remain Pending and can be processed manually.",
+   "fieldname": "auto_create_journal_entry",
+   "fieldtype": "Check",
+   "label": "Auto Create Journal Entry"
+  },
+  {
+   "default": "0",
+   "depends_on": "auto_create_journal_entry",
+   "description": "Submit automatically created Journal Entries. If this is enabled on any settings record where Auto Create is enabled, all settlement Journal Entries are submitted; otherwise they remain Draft for review.",
+   "fieldname": "auto_submit_journal_entry",
+   "fieldtype": "Check",
+   "label": "Auto Submit Journal Entry"
+  },
+  {
+   "depends_on": "auto_create_journal_entry",
+   "description": "Settlements with an earlier payout date are marked Skipped and never posted. Leave blank to process every incoming settlement.",
+   "fieldname": "reconciliation_start_date",
+   "fieldtype": "Date",
+   "label": "Reconcile Settlements On or After"
+  },
+  {
+   "fieldname": "column_break_recon",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0.50",
+   "description": "Maximum allowed difference between the charges derived from split_transactions[] and the payload header total. Easebuzz rounding drift of up to ~0.15 has been observed.",
+   "fieldname": "charge_tolerance",
+   "fieldtype": "Currency",
+   "label": "Charge Reconciliation Tolerance"
+  },
+  {
+   "default": "0",
+   "description": "Off = every payment mode's charges are debited to the charges expense account.",
+   "fieldname": "enable_payment_mode_rules",
+   "fieldtype": "Check",
+   "label": "Enable Payment Mode Rules"
+  },
+  {
+   "default": "Debit",
+   "depends_on": "enable_payment_mode_rules",
+   "description": "Applied when Easebuzz reports a transaction_type that has no row in the table below.",
+   "fieldname": "unknown_mode_behaviour",
+   "fieldtype": "Select",
+   "label": "Unknown Mode Behaviour",
+   "options": "Debit\nSkip\nFail"
+  },
+  {
+   "fieldname": "charge_accounts_section",
+   "fieldtype": "Section Break",
+   "label": "Easebuzz Charges Accounts"
+  },
+  {
+   "description": "Fallback used when a Company has no <b>Easebuzz Charges</b> account of its own. The Company field on the Company master wins; this table is consulted next. A settlement carrying charges for a company with neither is held for review.",
+   "fieldname": "company_charge_accounts",
+   "fieldtype": "Table",
+   "label": "Company Charge Accounts",
+   "options": "Easebuzz Company Charge Account"
+  },
+  {
+   "depends_on": "enable_payment_mode_rules",
+   "fieldname": "payment_mode_rules_section",
+   "fieldtype": "Section Break",
+   "label": "Payment Mode Rules"
+  },
+  {
+   "description": "Only the charges of modes with <b>Debit Charges to Expense</b> ticked are added to the charges debit line. Bank payout lines are never filtered \u2014 that money physically reached the bank.",
+   "fieldname": "allowed_mode_of_payment",
+   "fieldtype": "Table",
+   "label": "Allowed Mode of Payment",
+   "options": "Easebuzz Payment Mode Rule"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2023-07-27 15:11:17.802667",
+ "modified": "2026-08-19 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Easebuzz",
  "name": "Easebuzz Settings",

@@ -1,0 +1,109 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-19 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "journal_entry",
+  "status",
+  "payout_id",
+  "column_break_amounts",
+  "bank_total",
+  "charges_debited",
+  "charges_skipped",
+  "skipped_modes",
+  "error"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "journal_entry",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Journal Entry",
+   "options": "Journal Entry",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Draft\nSubmitted\nAlready Posted\nFailed",
+   "read_only": 1
+  },
+  {
+   "description": "Copied from the settlement payload so idempotency can be checked across logs.",
+   "fieldname": "payout_id",
+   "fieldtype": "Data",
+   "label": "Payout ID",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "column_break_amounts",
+   "fieldtype": "Column Break"
+  },
+  {
+   "columns": 2,
+   "fieldname": "bank_total",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Bank Total",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "charges_debited",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Charges Debited",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "charges_skipped",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Charges Skipped",
+   "read_only": 1
+  },
+  {
+   "fieldname": "skipped_modes",
+   "fieldtype": "Data",
+   "label": "Skipped Modes",
+   "read_only": 1
+  },
+  {
+   "fieldname": "error",
+   "fieldtype": "Small Text",
+   "label": "Error",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-19 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Easebuzz",
+ "name": "Easebuzz Settlement Reconciliation",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -1,129 +1,139 @@
-# Copyright (c) 2024, Hybrowlabs and contributors
+# Copyright (c) 2026, Hybrowlabs and contributors
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
-import json
+
+from easebuzz.easebuzz.utils.settlement import (
+    get_reconciliation_settings,
+    logger,
+    parse_settlement_payload,
+    process_settlement_log,
+)
+
+# Saving a log in one of these states starts (or retries) reconciliation.
+# "Processed", "Processing", "Needs Review" and "Skipped" are left alone -- those
+# either already posted or are waiting on a person, so re-saving must not refire.
+AUTO_PROCESS_STATUSES = ("", "Pending", "Failed")
+
 
 class EasebuzzSettlementLog(Document):
-	pass
+    def before_insert(self):
+        """Stamp the payout header so the list view is usable even if posting fails."""
+        if self.payout_id:
+            return
+        try:
+            payload = parse_settlement_payload(self.data)
+        except Exception:
+            return
+        self.payout_id = payload.get("payout_id")
+        if payload.get("payout_date"):
+            self.payout_date = frappe.utils.getdate(payload.get("payout_date"))
 
-def process_log(doc,method=None):
-	try:
-		data = doc.data[25:-73]
-		data = json.loads(data)
-		for split in data.get('split_payouts'):
-			label = split.get("account_label")
-			company = frappe.db.get_value("Bank Account",{'account_name':label},'company')
-			company = frappe.get_doc("Company",company)
-			je = frappe.new_doc("Journal Entry")
-			amount = split.get('payout_amount')
-			account = frappe.db.get_value("Bank Account",{'account_name':label},'account')
-			je.update({
-						"is_system_generated": 1,
-						"title": "Easebuzz Settlement",
-						"voucher_type": "Bank Entry",
-						"naming_series": "ACC-JV-.YYYY.-",
-						"company": company.name,
-						"posting_date": split.get("payout_date"),
-						"cheque_no": split.get("bank_transaction_id"),
-						"cheque_date": split.get("payout_date"),
-						"user_remark": "Easebuzz Settlement",
-						"total_debit": amount,
-						"total_credit": amount,
-						"write_off_based_on": "Accounts Receivable",
-						"write_off_amount": 0,
-						"letter_head": "Default letter head",
-						"mode_of_payment": "Online",
-						"is_opening": "No",
-						"repost_required": 0,
-						"doctype": "Journal Entry",
-			})
-			je.append("accounts",
-                  {
-                        "account": account,
-                        "account_type": "",
-                        "cost_center": company.cost_center,
-                        "account_currency": "INR",
-                        "exchange_rate": 1,
-                        "debit_in_account_currency": amount,
-                        "debit": amount,
-                        "credit_in_account_currency": 0,
-                        "credit": 0,
-                        "is_advance": "No",
-                        "against_account": company.default_easebuzz_account
-                        })
-			je.append("accounts",
-                  {
-                        "account": company.default_easebuzz_account,
-                        "account_type": "",
-                        "cost_center": company.cost_center,
-                        "account_currency": "INR",
-                        "exchange_rate": 1,
-                        "debit_in_account_currency": 0,
-                        "debit": 0,
-                        "credit_in_account_currency": amount,
-                        "credit": amount,
-                        "is_advance": "No",
-                        "against_account": account
-                        })
-			je.save(ignore_permissions=True)
-			je.submit()
-		for settled_transaction in data.get('settled_transactions'):
-			if settled_transaction.get('transaction_type') == 'Netbanking':
-				for split_transaction in settled_transaction.get('split_transactions'):
-					label = split_transaction.get("account_label")
-					company = frappe.db.get_value("Bank Account",{'account_name':label},'company')
-					company = frappe.get_doc("Company",company)
-					je = frappe.new_doc("Journal Entry")
-					amount = split_transaction.get('service_charge') + split_transaction.get("service_tax")		
-					je.update({
-						"is_system_generated": 1,
-						"title": "Easebuzz Settlement Charges",
-						"voucher_type": "Bank Entry",
-						"naming_series": "ACC-JV-.YYYY.-",
-						"company": company.name,
-						"posting_date": frappe.utils.nowdate(),
-						"cheque_no": settled_transaction.get("txnid"),
-						"cheque_date": frappe.utils.nowdate(),
-						"user_remark": "Easebuzz charges - easepayid:" + settled_transaction.get("easepayid"),
-						"total_debit": amount,
-						"total_credit": amount,
-						"write_off_based_on": "Accounts Receivable",
-						"write_off_amount": 0,
-						"letter_head": "Default letter head",
-						"mode_of_payment": "Online",
-						"is_opening": "No",
-						"repost_required": 0,
-						"doctype": "Journal Entry",
-					})
-					je.append("accounts",
-						{
-								"account": company.custom_easebuzz_charges,
-								"account_type": "",
-								"cost_center": company.cost_center,
-								"account_currency": "INR",
-								"exchange_rate": 1,
-								"debit_in_account_currency": amount,
-								"debit": amount,
-								"credit_in_account_currency": 0,
-								"credit": 0,
-								"is_advance": "No",
-								"against_account": company.default_easebuzz_account
-								})
-					je.append("accounts",
-						{
-								"account": company.default_easebuzz_account,
-								"account_type": "",
-								"cost_center": company.cost_center,
-								"account_currency": "INR",
-								"exchange_rate": 1,
-								"debit_in_account_currency": 0,
-								"debit": 0,
-								"credit_in_account_currency": amount,
-								"credit": amount,
-								"is_advance": "No",
-								"against_account": company.custom_easebuzz_charges
-								})
-	except Exception as e:
-		frappe.logger('ease').exception(e)
+    def on_update(self):
+        """Reconcile whenever the log is saved, insert included.
+
+        ``on_update`` fires on both insert and subsequent saves, so this is the
+        single trigger.  Re-running is safe: an already-posted
+        (payout_id, company) pair is recorded as Already Posted rather than
+        posted twice, which is what the original ``before_save`` hook lacked.
+        """
+        if self.flags.easebuzz_reconciling:
+            # We are inside the save that process_settlement_log itself performs.
+            return
+        if (self.status or "") not in AUTO_PROCESS_STATUSES:
+            return
+        self.queue_reconciliation()
+
+    @frappe.whitelist()
+    def process_log(self, force=False):
+        """Reconcile this log now, from the form or from the console."""
+        self.check_permission("write")
+        return process_settlement_log(self.name, force=force)
+
+    def queue_reconciliation(self):
+        """Reconcile this log once the save commits.
+
+        Nothing in here may raise.  The gateway posts each settlement once, so
+        a broken settings record must leave a Pending log to retry from --
+        never abort the insert and lose the payload.
+        """
+        try:
+            settings = get_reconciliation_settings()
+        except Exception as exc:
+            self._note(_("Cannot resolve Easebuzz Settings: {0}").format(exc))
+            return
+
+        if not settings:
+            self._note(_("No Easebuzz Settings record exists, so reconciliation is off."))
+            return
+        if not settings.get("auto_create_journal_entry"):
+            self._note(
+                _("Auto Create Journal Entry is off in all Easebuzz Settings records.")
+            )
+            return
+
+        self._note(None)
+
+        # Run on commit rather than through a worker.  The settlement has to
+        # post on save even where no queue is running, and reconciling here
+        # keeps it out of the current save cycle -- process_settlement_log
+        # saves the log itself and commits its own work.
+        name = self.name
+        frappe.db.after_commit.add(lambda: _reconcile_inline(name))
+
+    def _note(self, message):
+        """Record why reconciliation did or did not start, without rerunning hooks."""
+        if (self.error_message or None) == (message or None):
+            return
+        self.error_message = message
+        self.db_set("error_message", message, update_modified=False)
+
+
+def _reconcile_inline(name):
+    """Run reconciliation outside the save cycle; never let it escape.
+
+    The log's own save has already committed by the time this runs, so a
+    failure here must not be left as a silent Pending -- record it as Failed
+    so the list view shows it and a re-save retries it.
+    """
+    try:
+        process_settlement_log(name)
+        return
+    except Exception:
+        traceback = frappe.get_traceback()
+
+    # Discard whatever the failed run left half-built.
+    frappe.db.rollback()
+    logger().error(
+        f"Easebuzz Settlement Log {name}: automatic reconciliation failed\n{traceback}"
+    )
+
+    try:
+        frappe.db.set_value(
+            "Easebuzz Settlement Log",
+            name,
+            {"status": "Failed", "error_message": traceback},
+            update_modified=False,
+        )
+        frappe.db.commit()
+    except Exception:
+        failure = frappe.get_traceback()
+        frappe.db.rollback()
+        logger().error(
+            f"Easebuzz Settlement Log {name}: unable to record failure\n{failure}"
+        )
+
+
+@frappe.whitelist()
+def process_log(docname=None, doc=None, method=None, force=False):
+    """Process a settlement log on demand, from the form or from the console."""
+    name = docname
+    if not name and doc is not None:
+        name = doc if isinstance(doc, str) else doc.name
+    if not name:
+        frappe.throw(_("No Easebuzz Settlement Log specified."))
+
+    frappe.has_permission("Easebuzz Settlement Log", "write", doc=name, throw=True)
+    return process_settlement_log(name, force=force)

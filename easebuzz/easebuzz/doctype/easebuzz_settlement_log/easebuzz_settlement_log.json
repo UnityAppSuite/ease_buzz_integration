@@ -7,9 +7,102 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "payout_id",
+  "payout_date",
+  "status",
+  "column_break_header",
+  "total_amount",
+  "payout_amount",
+  "charges_amount",
+  "reconciliation_section",
+  "reconciliation",
+  "error_section",
+  "error_message",
+  "payload_section",
   "data"
  ],
  "fields": [
+  {
+   "fieldname": "payout_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Payout ID",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "payout_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Payout Date",
+   "read_only": 1
+  },
+  {
+   "default": "Pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Pending\nProcessing\nProcessed\nNeeds Review\nFailed\nSkipped",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "column_break_header",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "label": "Total Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payout_amount",
+   "fieldtype": "Currency",
+   "label": "Payout Amount",
+   "read_only": 1
+  },
+  {
+   "description": "service_charge_amount + service_tax_amount from the payload header.",
+   "fieldname": "charges_amount",
+   "fieldtype": "Currency",
+   "label": "Charges Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reconciliation_section",
+   "fieldtype": "Section Break",
+   "label": "Reconciliation"
+  },
+  {
+   "fieldname": "reconciliation",
+   "fieldtype": "Table",
+   "label": "Journal Entries",
+   "options": "Easebuzz Settlement Reconciliation",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "depends_on": "error_message",
+   "fieldname": "error_section",
+   "fieldtype": "Section Break",
+   "label": "Error"
+  },
+  {
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Error Message",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "payload_section",
+   "fieldtype": "Section Break",
+   "label": "Payload"
+  },
   {
    "fieldname": "data",
    "fieldtype": "Code",
@@ -18,7 +111,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2024-01-19 13:57:57.534226",
+ "modified": "2026-08-19 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Easebuzz",
  "name": "Easebuzz Settlement Log",
