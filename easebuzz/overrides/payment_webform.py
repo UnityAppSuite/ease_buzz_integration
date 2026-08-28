@@ -1,9 +1,15 @@
 import frappe
-from payments.overrides.payment_webform import PaymentWebForm
+from frappe.website.doctype.web_form.web_form import WebForm
 from payments.utils import get_payment_gateway_controller
 
 
-class CustomPaymentWebForm(PaymentWebForm):
+# Registered via extend_doctype_class, not override_doctype_class. frappe v16
+# composes Web Form as type("ExtendedWebForm", (*extensions, WebForm)), so this
+# class must be a sibling of payments' PaymentWebForm, not its subclass -- a base
+# cannot precede its own subclass in an MRO. Extensions are applied in reverse
+# install order, so easebuzz (installed after payments) takes precedence and its
+# get_payment_gateway_url wins, while payments' validate() is still inherited.
+class CustomPaymentWebForm(WebForm):
     def get_payment_gateway_url(self, doc):
         if getattr(self, "accept_payment", False):
             controller = get_payment_gateway_controller(self.payment_gateway)
