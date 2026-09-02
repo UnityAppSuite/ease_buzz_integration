@@ -1,9 +1,9 @@
 import frappe
-from payments.overrides.payment_webform import PaymentWebForm
+from frappe.website.doctype.web_form.web_form import WebForm
 from payments.utils import get_payment_gateway_controller
 
 
-class CustomPaymentWebForm(PaymentWebForm):
+class CustomPaymentWebForm(WebForm):
     def get_payment_gateway_url(self, doc):
         if getattr(self, "accept_payment", False):
             controller = get_payment_gateway_controller(self.payment_gateway)
