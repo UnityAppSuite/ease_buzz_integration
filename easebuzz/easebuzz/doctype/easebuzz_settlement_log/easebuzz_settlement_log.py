@@ -124,16 +124,3 @@ def _reconcile_inline(name):
         logger().error(
             f"Easebuzz Settlement Log {name}: unable to record failure\n{failure}"
         )
-
-
-@frappe.whitelist()
-def process_log(docname=None, doc=None, method=None, force=False):
-    """Process a settlement log on demand, from the form or from the console."""
-    name = docname
-    if not name and doc is not None:
-        name = doc if isinstance(doc, str) else doc.name
-    if not name:
-        frappe.throw(_("No Easebuzz Settlement Log specified."))
-
-    frappe.has_permission("Easebuzz Settlement Log", "write", doc=name, throw=True)
-    return process_settlement_log(name, force=force)

@@ -41,8 +41,9 @@ frappe.ui.form.on("Easebuzz Settlement Log", {
 			const run = () =>
 				frm
 					.call({
-						method: "easebuzz.easebuzz.doctype.easebuzz_settlement_log.easebuzz_settlement_log.process_log",
-						args: { docname: frm.doc.name, force: processed },
+						doc: frm.doc,
+						method: "process_log",
+						args: { force: processed },
 						freeze: true,
 						freeze_message: __("Reconciling settlement..."),
 					})

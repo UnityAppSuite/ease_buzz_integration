@@ -10,19 +10,12 @@ from frappe.utils.data import cint, flt
 from payments.utils.utils import create_payment_gateway
 
 
-# The transaction_type strings Easebuzz sends, paired with the ERPNext Mode of
-# Payment they correspond to.  Matching is done on the string, not the link, so
-# a missing or renamed Mode of Payment record cannot break a rule.
 # Name used when the settings form creates a missing charges ledger.  ERPNext
 # appends the company abbreviation, so this becomes "Easebuzz Charges - UESF".
 DEFAULT_CHARGE_ACCOUNT_NAME = "Easebuzz Charges"
 
-EASEBUZZ_TRANSACTION_TYPES = (
-    ("UPI", "UPI"),
-    ("Credit Card", "Credit Card"),
-    ("Debit Card", "Debit Card"),
-    ("Netbanking", "Netbanking"),
-)
+# The transaction_type strings Easebuzz sends.
+EASEBUZZ_TRANSACTION_TYPES = ("UPI", "Credit Card", "Debit Card", "Netbanking")
 
 
 class EasebuzzSettings(Document):
@@ -317,20 +310,8 @@ class EasebuzzSettings(Document):
 
 @frappe.whitelist()
 def get_known_transaction_types():
-    """The transaction types Easebuzz is known to report, for the settings form.
-
-    Read-only on purpose: the rows are appended client-side so seeding cannot
-    persist unrelated unsaved edits on the form.
-    """
-    return [
-        {
-            "easebuzz_transaction_type": transaction_type,
-            "mode_of_payment": (
-                mode_of_payment if frappe.db.exists("Mode of Payment", mode_of_payment) else None
-            ),
-        }
-        for transaction_type, mode_of_payment in EASEBUZZ_TRANSACTION_TYPES
-    ]
+    """Transaction types Easebuzz reports, for seeding the rules table."""
+    return list(EASEBUZZ_TRANSACTION_TYPES)
 
 
 @frappe.whitelist()
