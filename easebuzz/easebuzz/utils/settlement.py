@@ -181,7 +181,7 @@ def resolve_bank_account(account_number):
     rows = frappe.get_all(
         "Bank Account",
         filters={"bank_account_no": account_number},
-        fields=["name", "account", "company", "disabled"],
+        fields=["name", "account", "company", "disabled", "is_company_account"],
     )
     if not rows:
         raise SettlementError(
@@ -197,6 +197,10 @@ def resolve_bank_account(account_number):
                 rows[0].name, account_number
             )
         )
+    if len(enabled) > 1:
+        # Settlement lands in the company's own account; other rows sharing the
+        # number are party/fee-head records.
+        enabled = [row for row in enabled if row.is_company_account] or enabled
     if len(enabled) > 1:
         raise SettlementError(
             _("Easebuzz account number {0} matches more than one enabled Bank Account: {1}.").format(
@@ -379,12 +383,12 @@ def validate_segregation(payload, result, tolerance):
 # --------------------------------------------------------------------------- #
 
 def already_posted(payout_id, company):
-    """Return an existing Journal Entry for this payout and company, if any.
+    """Return ``(journal_entry, docstatus)`` already posted for this payout and company.
 
     Easebuzz redelivers settlements -- payout PTOBWKJAUF arrives twice in the
     production log set -- so this is what keeps reruns from double-posting.
     Cancelled entries do not count, which lets a cancel-and-repost correction
-    go through.
+    go through.  Returns ``None`` when there is none.
     """
     rows = frappe.get_all(
         "Easebuzz Settlement Reconciliation",
@@ -392,8 +396,9 @@ def already_posted(payout_id, company):
         pluck="journal_entry",
     )
     for name in rows:
-        if frappe.db.get_value("Journal Entry", name, "docstatus") in (0, 1):
-            return name
+        docstatus = frappe.db.get_value("Journal Entry", name, "docstatus")
+        if docstatus in (0, 1):
+            return name, docstatus
     return None
 
 
@@ -429,10 +434,8 @@ def build_journal_entry(payload, log_name, bucket, precision, settings=None):
     if charges and not charges_account:
         raise SettlementError(
             _(
-                "Company {0} has no Easebuzz Charges account, but this settlement carries "
-                "{1} of charges to debit. Set Easebuzz Charges on the Company, or add a row "
-                "for {0} under Easebuzz Charges Accounts in Easebuzz Settings -- the settings "
-                "form can create the account for you."
+                "Company {0} has no Easebuzz Charges account to debit {1} of charges. "
+                "Set it on the Company or under Easebuzz Charges Accounts in Easebuzz Settings."
             ).format(bucket["company"], charges)
         )
 
@@ -531,7 +534,7 @@ def build_journal_entry(payload, log_name, bucket, precision, settings=None):
     for account in accounts:
         je.append("accounts", account)
 
-    return je, total_debit
+    return je
 
 
 # --------------------------------------------------------------------------- #
@@ -614,7 +617,7 @@ def process_settlement_log(name, force=False):
         return _finish(
             doc,
             "Needs Review",
-            _("Journal Entries are held as Draft for confirmation before auto-submit is enabled."),
+            _("Journal Entries are still Draft. Review and submit them to complete this settlement."),
         )
     return _finish(doc, "Processed", None)
 
@@ -637,8 +640,12 @@ def _post_companies(doc, payload, result, auto_submit, precision, name, settings
 
         existing = already_posted(payload["payout_id"], company)
         if existing:
-            row.update({"journal_entry": existing, "status": "Already Posted"})
+            je_name, je_docstatus = existing
+            row.update({"journal_entry": je_name, "status": "Already Posted"})
             doc.append("reconciliation", row)
+            # A Draft entry has not reached the GL, so the log is not done yet.
+            if je_docstatus == 0:
+                held_for_review = True
             continue
 
         # One company failing must not roll back the companies that already
@@ -646,7 +653,7 @@ def _post_companies(doc, payload, result, auto_submit, precision, name, settings
         save_point = f"easebuzz_settlement_{index}"
         frappe.db.savepoint(save_point)
         try:
-            je, _total = build_journal_entry(payload, doc.name, bucket, precision, settings)
+            je = build_journal_entry(payload, doc.name, bucket, precision, settings)
             je.insert(ignore_permissions=True)
 
             submit = auto_submit

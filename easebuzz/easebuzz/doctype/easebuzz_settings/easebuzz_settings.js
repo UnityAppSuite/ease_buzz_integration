@@ -40,12 +40,11 @@ frappe.ui.form.on("Easebuzz Settings", {
 				);
 				const added = [];
 				(r.message || []).forEach((mode) => {
-					if (existing.has(mode.easebuzz_transaction_type)) return;
+					if (existing.has(mode)) return;
 					const row = frm.add_child("allowed_mode_of_payment");
-					row.easebuzz_transaction_type = mode.easebuzz_transaction_type;
-					row.mode_of_payment = mode.mode_of_payment;
+					row.easebuzz_transaction_type = mode;
 					row.debit_charges = 1;
-					added.push(mode.easebuzz_transaction_type);
+					added.push(mode);
 				});
 				frm.refresh_field("allowed_mode_of_payment");
 				frappe.show_alert({
@@ -56,17 +55,6 @@ frappe.ui.form.on("Easebuzz Settings", {
 				});
 			});
 		});
-	},
-});
-
-frappe.ui.form.on("Easebuzz Payment Mode Rule", {
-	mode_of_payment(frm, cdt, cdn) {
-		// Pre-fill the matching key, which the user can then correct to whatever
-		// Easebuzz actually sends (e.g. "Netbanking", not "Net Banking").
-		const row = locals[cdt][cdn];
-		if (row.mode_of_payment && !row.easebuzz_transaction_type) {
-			frappe.model.set_value(cdt, cdn, "easebuzz_transaction_type", row.mode_of_payment);
-		}
 	},
 });
 
@@ -140,7 +128,7 @@ function render_charge_accounts(rows) {
 		.join("");
 
 	return `<p class="text-muted small">${__(
-		"Charges post to the account on the Company master first; the Company Charge Accounts table is the fallback. A company with neither is held for review when its settlement carries charges."
+		"Company master account first, then the Company Charge Accounts table."
 	)}</p>
 	<table class="table table-bordered">
 		<thead><tr><th>${__("Company")}</th><th>${__("Charges Account")}</th><th>${__("Source")}</th></tr></thead>

@@ -66,7 +66,6 @@
    "read_only": 1
   },
   {
-   "description": "service_charge_amount + service_tax_amount from the payload header.",
    "fieldname": "charges_amount",
    "fieldtype": "Currency",
    "label": "Charges Amount",
@@ -111,7 +110,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-19 10:00:00.000000",
+ "modified": "2026-10-02 12:30:00.000000",
  "modified_by": "Administrator",
  "module": "Easebuzz",
  "name": "Easebuzz Settlement Log",
