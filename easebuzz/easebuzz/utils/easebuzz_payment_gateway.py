@@ -85,6 +85,18 @@ class Easebuzz:
         result = payment.initiate_payment(params, self.MERCHANT_KEY, self.SALT, self.ENV)
         return result.get("data")
 
+    def initiatePaymentForSDK(self, params):
+        """Initiate one payment and return Easebuzz's transaction access key.
+
+        The hosted checkout still uses initiatePaymentAPI, whose URL-only return contract is unchanged.
+        """
+        from . import payment
+
+        result = payment.initiate_payment(params, self.MERCHANT_KEY, self.SALT, self.ENV)
+        if result.get("status") != 1 or not result.get("access_key"):
+            raise ValueError("Easebuzz could not initiate the payment")
+        return result["access_key"]
+
 
     '''
     *
