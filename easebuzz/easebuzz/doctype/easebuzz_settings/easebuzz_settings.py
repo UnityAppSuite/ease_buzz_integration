@@ -233,6 +233,50 @@ class EasebuzzSettings(Document):
             )
 
 
+    def get_payment_access_key(self, **kwargs):
+        """Initiate the same fee transaction as the web checkout, but return its native SDK key.
+
+        The caller must authorize the student and validate the selected gateway before reaching here.
+        """
+        doctype = kwargs["reference_doctype"]
+        docname = kwargs["reference_docname"]
+        doc = frappe.get_doc(doctype, docname)
+        student = frappe.get_doc("Student", doc.student)
+        requested_method = kwargs.get("payment_method") or ""
+        method = get_payment_mode(requested_method) if requested_method else ""
+        if requested_method and not method:
+            frappe.throw("Select a valid Easebuzz payment method")
+
+        salt = self.get_password(fieldname="salt", raise_exception=False)
+        self.client = Easebuzz(self.merchant_key, salt, self.env)
+        site_url = frappe.utils.get_url()
+        payload = {
+            "txnid": frappe.generate_hash(length=40),
+            "firstname": self.process_name(student.first_name),
+            "phone": student.student_mobile_number or "9999999999",
+            "email": kwargs["payer_email"],
+            "amount": str(float(kwargs["amount"])),
+            "productinfo": f"Payment for {doctype} {student.name} - {student.student_name}",
+            "surl": f"{site_url}/easebuzz/success",
+            "furl": f"{site_url}/easebuzz/failure",
+            "city": student.city,
+            "zipcode": student.pincode,
+            "address1": student.address_line_1,
+            "address2": student.address_line_2,
+            "state": student.state,
+            "country": student.country,
+            "split_payments": kwargs.get("split_payments") or {},
+            "show_payment_mode": method,
+            "udf1": doctype,
+            "udf2": self.format_data(docname),
+            "udf3": kwargs.get("payment_term", ""),
+            "udf4": self.format_data(kwargs.get("payment_plan", "")),
+            "udf5": kwargs.get("fee_hash", ""),
+        }
+        access_key = self.client.initiatePaymentForSDK(payload)
+        return {"access_key": access_key, "pay_mode": "production" if self.client.ENV == "prod" else "test"}
+
+
     def process_name(self,name):
         return ''.join(c for c in name if c.isalnum())
 
@@ -259,24 +303,37 @@ class EasebuzzSettings(Document):
         payment_request_docname = data.get("udf2")
         status = data.get("status")
         transaction_id = data.get("txnid")
-        if status == "success":
-            if frappe.db.exists(payment_request_doctype, payment_request_docname):
-                frappe.msgprint("Payment Request exists")
-                payment_request = frappe.get_doc(
-                    payment_request_doctype,
-                    payment_request_docname,
-                    ignore_permissions=True,
-                )
-                frappe.db.set_value(
-                    payment_request_doctype,
-                    payment_request_docname,
-                    "transaction_id",
-                    transaction_id,
-                )
-                payment_request.on_payment_authorized(status="Completed")
-                return {"message": "Payment Successful"}
-            else:
-                frappe.msgprint("Payment Request does not exist, Invalid Request")
+        if status != "success":
+            return
+        if payment_request_doctype == "Fees":
+            fee_name = self.format_data(payment_request_docname, reverse=True)
+            if not frappe.db.exists("Fees", fee_name):
+                frappe.log_error(f"Fees {fee_name} does not exist")
+                return
+            fee = frappe.get_doc("Fees", fee_name, ignore_permissions=True)
+            fee.on_payment_authorized(
+                status="Completed",
+                payment_term=data.get("udf3"),
+                transaction_id=transaction_id,
+                amount=data.get("amount"),
+            )
+            return {"message": "Payment Successful"}
+        if frappe.db.exists(payment_request_doctype, payment_request_docname):
+            frappe.msgprint("Payment Request exists")
+            payment_request = frappe.get_doc(
+                payment_request_doctype,
+                payment_request_docname,
+                ignore_permissions=True,
+            )
+            frappe.db.set_value(
+                payment_request_doctype,
+                payment_request_docname,
+                "transaction_id",
+                transaction_id,
+            )
+            payment_request.on_payment_authorized(status="Completed")
+            return {"message": "Payment Successful"}
+        frappe.msgprint("Payment Request does not exist, Invalid Request")
 
     def handle_response_web_form(self, data):
         doctype = data.get("udf1")
