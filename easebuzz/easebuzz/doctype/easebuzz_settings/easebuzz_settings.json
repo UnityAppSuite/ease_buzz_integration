@@ -12,7 +12,18 @@
   "merchant_key",
   "salt",
   "env",
-  "surcharge"
+  "surcharge",
+  "reconciliation_section",
+  "auto_create_journal_entry",
+  "auto_submit_journal_entry",
+  "reconciliation_start_date",
+  "column_break_recon",
+  "charge_tolerance",
+  "enable_payment_mode_rules",
+  "unknown_mode_behaviour",
+  "company_charge_accounts",
+  "payment_mode_rules_section",
+  "allowed_mode_of_payment"
  ],
  "fields": [
   {
@@ -42,11 +53,85 @@
    "fieldtype": "Data",
    "label": "Easebuzz Account",
    "unique": 1
+  },
+  {
+   "fieldname": "reconciliation_section",
+   "fieldtype": "Section Break",
+   "label": "Easebuzz Reconciliation",
+   "collapsible": 1
+  },
+  {
+   "default": "0",
+   "description": "Off = logs stay Pending; process manually.",
+   "fieldname": "auto_create_journal_entry",
+   "fieldtype": "Check",
+   "label": "Auto Create Journal Entry"
+  },
+  {
+   "default": "0",
+   "depends_on": "auto_create_journal_entry",
+   "description": "Off = Journal Entries stay Draft.",
+   "fieldname": "auto_submit_journal_entry",
+   "fieldtype": "Check",
+   "label": "Auto Submit Journal Entry"
+  },
+  {
+   "depends_on": "auto_create_journal_entry",
+   "description": "Earlier payouts are Skipped.",
+   "fieldname": "reconciliation_start_date",
+   "fieldtype": "Date",
+   "label": "Reconcile Settlements On or After"
+  },
+  {
+   "fieldname": "column_break_recon",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0.50",
+   "description": "Max charge difference vs payload header.",
+   "fieldname": "charge_tolerance",
+   "fieldtype": "Currency",
+   "label": "Charge Reconciliation Tolerance"
+  },
+  {
+   "default": "0",
+   "description": "Off = all modes' charges are debited.",
+   "fieldname": "enable_payment_mode_rules",
+   "fieldtype": "Check",
+   "label": "Enable Payment Mode Rules"
+  },
+  {
+   "default": "Debit",
+   "depends_on": "enable_payment_mode_rules",
+   "description": "For modes with no rule below.",
+   "fieldname": "unknown_mode_behaviour",
+   "fieldtype": "Select",
+   "label": "Unknown Mode Behaviour",
+   "options": "Debit\nSkip\nFail"
+  },
+  {
+   "description": "Used when the Company has no Easebuzz Charges account.",
+   "fieldname": "company_charge_accounts",
+   "fieldtype": "Table",
+   "label": "Company Charge Accounts",
+   "options": "Easebuzz Company Charge Account"
+  },
+  {
+   "depends_on": "enable_payment_mode_rules",
+   "fieldname": "payment_mode_rules_section",
+   "fieldtype": "Section Break",
+   "label": "Payment Mode Rules"
+  },
+  {
+   "fieldname": "allowed_mode_of_payment",
+   "fieldtype": "Table",
+   "label": "Allowed Mode of Payment",
+   "options": "Easebuzz Payment Mode Rule"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2023-07-27 15:11:17.802667",
+ "modified": "2026-10-02 12:30:00.000000",
  "modified_by": "Administrator",
  "module": "Easebuzz",
  "name": "Easebuzz Settings",
