@@ -280,6 +280,18 @@ class EasebuzzSettings(Document):
     def process_name(self,name):
         return ''.join(c for c in name if c.isalnum())
 
+    def format_data(self, value, reverse=False):
+        """
+        Format data for payment gateway compatibility.
+        Replaces '(' with '@' and ')' with '#' when reverse is False,
+        and vice versa when reverse is True.
+        """
+        if not value or not isinstance(value, str):
+            return value or ""
+        if reverse:
+            return value.replace("@", "(").replace("#", ")").strip()
+        return value.strip().replace("(", "@").replace(")", "#")
+
     def get_settings(self, data):
         settings = frappe._dict(
             {
