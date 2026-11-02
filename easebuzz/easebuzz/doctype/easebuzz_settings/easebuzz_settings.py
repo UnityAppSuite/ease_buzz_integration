@@ -5,6 +5,7 @@ import json
 import frappe
 from frappe.model.document import Document
 from easebuzz.easebuzz.utils.easebuzz_payment_gateway import Easebuzz
+from easebuzz.easebuzz.utils.payment_safety import all_salts, signature_valid, switch
 from frappe.utils import call_hook_method
 from frappe.utils.data import cint, flt
 from payments.utils.utils import create_payment_gateway
@@ -266,7 +267,22 @@ class EasebuzzSettings(Document):
         """
         Handle the response from the Easebuzz payment gateway
         """
-        session_user = frappe.session.user
+        login_manager = None
+
+        if switch("bis_verify_gateway_signature") and not signature_valid(data, all_salts()):
+            # Never log the hash or the salt.
+            frappe.log_error(
+                title="Easebuzz callback rejected: hash mismatch",
+                message=(
+                    f"txnid: {data.get('txnid')}\n"
+                    f"udf1: {data.get('udf1')}\n"
+                    f"udf2: {data.get('udf2')}\n"
+                    f"udf3: {data.get('udf3')}\n"
+                    f"status: {data.get('status')}"
+                ),
+            )
+            return {"message": "Invalid signature"}
+
         try:
             frappe.set_user("Administrator")
 
@@ -312,11 +328,15 @@ class EasebuzzSettings(Document):
             
             return {"message": "Payment Successful"}
             
-        except Exception:
+        except Exception as e:
+            if switch("bis_rollback_failed_payments"):
+                # Discard whatever the failed payment half-did before it gets committed.
+                frappe.db.rollback()
             frappe.log_error("Error in handle_response", frappe.get_traceback())
             return {"message": "Payment processing failed"}
         finally:
-            frappe.set_user(session_user)
+            if login_manager:
+                login_manager.logout()
 
     def handle_response_web_form(self, data):
         doctype = data.get("udf1")
