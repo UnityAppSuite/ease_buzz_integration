@@ -1,10 +1,9 @@
 from hashlib import sha512
 
+import requests
 import json
 import re
 import traceback
-
-from easebuzz.easebuzz.utils.api_client import make_request
 
 '''
 *
@@ -387,16 +386,10 @@ def _refundPayment(params_array, salt_key, url):
     hash_key = _getHashKey(params_array, salt_key)
     params_array['hash'] = hash_key
 
-    # Make API call with logging
-    full_url = url + 'transaction/v1/refund'
-    result = make_request(
-        url=full_url,
-        data=params_array,
-        service="Refund",
-        method="POST"
-    )
+    # requests call for retrive transaction
+    request_result = requests.post(url + 'transaction/v1/refund', params_array)
 
-    return result
+    return json.loads(request_result.content)
 
 
 '''

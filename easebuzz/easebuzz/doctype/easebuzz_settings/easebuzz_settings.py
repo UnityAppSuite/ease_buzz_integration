@@ -3,7 +3,6 @@
 
 import json
 import frappe
-from frappe.auth import LoginManager
 from frappe.model.document import Document
 from easebuzz.easebuzz.utils.easebuzz_payment_gateway import Easebuzz
 from frappe.utils import call_hook_method
@@ -11,9 +10,16 @@ from frappe.utils.data import cint, flt
 from payments.utils.utils import create_payment_gateway
 
 
+# Name used when the settings form creates a missing charges ledger.  ERPNext
+# appends the company abbreviation, so this becomes "Easebuzz Charges - UESF".
+DEFAULT_CHARGE_ACCOUNT_NAME = "Easebuzz Charges"
+
+# The transaction_type strings Easebuzz sends.
+EASEBUZZ_TRANSACTION_TYPES = ("UPI", "Credit Card", "Debit Card", "Netbanking")
+
+
 class EasebuzzSettings(Document):
     supported_currencies = ["INR"]
-
 
     def init_client(self, surcharge):
         settings = frappe.get_doc("Easebuzz Settings", {"surcharge": surcharge})
@@ -23,7 +29,84 @@ class EasebuzzSettings(Document):
     def after_insert(self):
         create_payment_gateway("Easebuzz", "Easebuzz Settings", self.name)
         call_hook_method("payment_gateway_enabled", gateway="Easebuzz")
-      
+
+    def validate(self):
+        self.validate_payment_mode_rules()
+        self.validate_company_charge_accounts()
+
+    def validate_payment_mode_rules(self):
+        """Reject duplicate or blank transaction types in the charge rule table.
+
+        Frappe does not enforce uniqueness on child rows, and two rows for the
+        same mode with opposite Debit Charges settings would make the applied
+        rule depend on row order.
+        """
+        seen = {}
+        for row in self.get("allowed_mode_of_payment") or []:
+            key = (row.easebuzz_transaction_type or "").strip()
+            if not key:
+                frappe.throw(
+                    frappe._("Row #{0}: Easebuzz Transaction Type is required.").format(row.idx)
+                )
+            row.easebuzz_transaction_type = key
+            if key in seen:
+                frappe.throw(
+                    frappe._(
+                        "Rows #{0} and #{1} both configure the Easebuzz transaction type "
+                        "'{2}'. Each mode may appear only once."
+                    ).format(seen[key], row.idx, key)
+                )
+            seen[key] = row.idx
+
+    def validate_company_charge_accounts(self):
+        """Keep the fallback table unambiguous and postable.
+
+        A second row for the same company would make the account that gets
+        debited depend on row order, and an account belonging to another company
+        would only surface as an ERPNext error deep inside a settlement job.
+        """
+        seen = {}
+        for row in self.get("company_charge_accounts") or []:
+            if row.company in seen:
+                frappe.throw(
+                    frappe._(
+                        "Rows #{0} and #{1} both configure a charges account for {2}. "
+                        "Each company may appear only once."
+                    ).format(seen[row.company], row.idx, row.company)
+                )
+            seen[row.company] = row.idx
+
+            account = frappe.db.get_value(
+                "Account",
+                row.charges_account,
+                ["company", "is_group", "root_type"],
+                as_dict=True,
+            )
+            if not account:
+                frappe.throw(
+                    frappe._("Row #{0}: Account {1} does not exist.").format(
+                        row.idx, row.charges_account
+                    )
+                )
+            if account.company != row.company:
+                frappe.throw(
+                    frappe._(
+                        "Row #{0}: Account {1} belongs to {2}, not to {3}."
+                    ).format(row.idx, row.charges_account, account.company, row.company)
+                )
+            if account.is_group:
+                frappe.throw(
+                    frappe._(
+                        "Row #{0}: {1} is a group account. Charges must be debited to a ledger."
+                    ).format(row.idx, row.charges_account)
+                )
+            if account.root_type != "Expense":
+                frappe.throw(
+                    frappe._(
+                        "Row #{0}: {1} is {2}, not an Expense account."
+                    ).format(row.idx, row.charges_account, account.root_type)
+                )
+
     def validate_transaction_currency(self, currency):
         if currency not in self.supported_currencies:
             frappe.throw(
@@ -144,66 +227,58 @@ class EasebuzzSettings(Document):
             frappe.logger("ease_settle").exception(postDict)
             url = self.client.initiatePaymentAPI(postDict)
             return url
-        except Exception:
+        except:
             frappe.log_error(
                 "Error while Generating Payment Link", frappe.get_traceback()
             )
 
-    def get_payment_url_applicant(self, **kwargs):
-        """Generate payment URL for Student Applicant deposit payment."""
-        try:
-            applicant_id = kwargs.get("applicant_id")
-            applicant = frappe.get_doc("Student Applicant", applicant_id)
-            site_url = frappe.utils.get_url()
 
-            student_name = kwargs.get("student_name") or f"{applicant.first_name} {applicant.last_name or ''}".strip()
-            payment_method = kwargs.get("payment_method") or ""
-            show_payment_mode = get_payment_mode(payment_method) if payment_method else ""
+    def get_payment_access_key(self, **kwargs):
+        """Initiate the same fee transaction as the web checkout, but return its native SDK key.
 
-            self.init_client(surcharge=1 if show_payment_mode in ["CC", "DC"] else 0)
+        The caller must authorize the student and validate the selected gateway before reaching here.
+        """
+        doctype = kwargs["reference_doctype"]
+        docname = kwargs["reference_docname"]
+        doc = frappe.get_doc(doctype, docname)
+        student = frappe.get_doc("Student", doc.student)
+        requested_method = kwargs.get("payment_method") or ""
+        method = get_payment_mode(requested_method) if requested_method else ""
+        if requested_method and not method:
+            frappe.throw("Select a valid Easebuzz payment method")
 
-            postDict = {
-                "txnid": frappe.generate_hash(length=40),
-                "firstname": self.process_name(applicant.first_name or "Applicant"),
-                "phone": kwargs.get("payer_phone") or applicant.student_mobile_number or "9999999999",
-                "email": kwargs.get("payer_email") or applicant.student_email_id,
-                "amount": f"{float(kwargs.get('amount'))}",
-                "productinfo": f"Deposit Payment for {student_name}",
-                "surl": f"{site_url}/easebuzz/success",
-                "furl": f"{site_url}/easebuzz/failure",
-                "city": applicant.city or "",
-                "zipcode": applicant.pincode or "",
-                "address1": applicant.address_line_1 or "",
-                "address2": applicant.address_line_2 or "",
-                "state": applicant.state or "",
-                "country": applicant.country or "India",
-                "split_payments": kwargs.get("split_payments", ""),
-                "show_payment_mode": show_payment_mode,
-                "udf1": "Student Applicant",
-                "udf2": applicant_id,
-                "udf3": "applicant",
-                "udf4": "",
-                "udf5": "",
-            }
-            return self.client.initiatePaymentAPI(postDict)
-        except Exception as e:
-            frappe.log_error(f"Error generating Applicant Payment Link: {str(e)}", frappe.get_traceback())
-            return None
+        salt = self.get_password(fieldname="salt", raise_exception=False)
+        self.client = Easebuzz(self.merchant_key, salt, self.env)
+        site_url = frappe.utils.get_url()
+        payload = {
+            "txnid": frappe.generate_hash(length=40),
+            "firstname": self.process_name(student.first_name),
+            "phone": student.student_mobile_number or "9999999999",
+            "email": kwargs["payer_email"],
+            "amount": str(float(kwargs["amount"])),
+            "productinfo": f"Payment for {doctype} {student.name} - {student.student_name}",
+            "surl": f"{site_url}/easebuzz/success",
+            "furl": f"{site_url}/easebuzz/failure",
+            "city": student.city,
+            "zipcode": student.pincode,
+            "address1": student.address_line_1,
+            "address2": student.address_line_2,
+            "state": student.state,
+            "country": student.country,
+            "split_payments": kwargs.get("split_payments") or {},
+            "show_payment_mode": method,
+            "udf1": doctype,
+            "udf2": self.format_data(docname),
+            "udf3": kwargs.get("payment_term", ""),
+            "udf4": self.format_data(kwargs.get("payment_plan", "")),
+            "udf5": kwargs.get("fee_hash", ""),
+        }
+        access_key = self.client.initiatePaymentForSDK(payload)
+        return {"access_key": access_key, "pay_mode": "production" if self.client.ENV == "prod" else "test"}
+
 
     def process_name(self,name):
         return ''.join(c for c in name if c.isalnum())
-    
-    def format_data(self, value, reverse=False):
-        """
-        Format data for payment gateway compatibility.
-        Replaces '(' with '@' and ')' with '#' when reverse is False,
-        and vice versa when reverse is True.
-        """
-        if not value or not isinstance(value, str):
-            return value or ""
-        if reverse:
-            return value.replace("@", "(").replace("#", ")").strip()
-        return value.strip().replace("(", "@").replace(")", "#")
 
     def get_settings(self, data):
         settings = frappe._dict(
@@ -224,61 +299,41 @@ class EasebuzzSettings(Document):
         return settings
 
     def handle_response(self, data):
-        """
-        Handle the response from the Easebuzz payment gateway
-        """
-        try:
-            # TODO: need to create a new user for this purpose
-            login_manager = LoginManager()
-            login_manager.login_as("Administrator")
-            
-            # Extract and validate required data
-            doctype = data.get("udf1")
-            docname = self.format_data(data.get("udf2"), reverse=True)
-            payment_term = data.get("udf3")
-            status = data.get("status")
-            amount = data.get("amount")
-            transaction_id = data.get("txnid")
-            
-            if status != "success":
-                return {"message": "Payment Validation Failed"}
-            
-            # Validate document exists
-            if not frappe.db.exists(doctype, docname):
-                frappe.log_error(f"{doctype} {docname} does not exist")
-                return {"message": "Document not found"}
-            
-            # Process payment based on doctype
-            doc = frappe.get_doc(doctype, docname, ignore_permissions=True)
-            
-            if doctype == "Fees":
-                doc.on_payment_authorized(
-                    status="Completed",
-                    payment_term=payment_term,
-                    transaction_id=transaction_id,
-                    amount=amount
-                )
-            elif doctype == "Payment Request":
-                doc.on_payment_authorized(status="Completed")
-            elif doctype == "Student Applicant":
-                result = doc.on_payment_authorized(
-                    status="Completed",
-                    transaction_id=transaction_id,
-                    amount=amount
-                )
-                frappe.logger("easebuzz").info(f"Applicant payment processed: {result}")
-                return result
-            else:
-                frappe.log_error(f"Unsupported doctype: {doctype} name: {docname}")
-                return {"message": "Unsupported document type"}
-            
+        payment_request_doctype = data.get("udf1")
+        payment_request_docname = data.get("udf2")
+        status = data.get("status")
+        transaction_id = data.get("txnid")
+        if status != "success":
+            return
+        if payment_request_doctype == "Fees":
+            fee_name = self.format_data(payment_request_docname, reverse=True)
+            if not frappe.db.exists("Fees", fee_name):
+                frappe.log_error(f"Fees {fee_name} does not exist")
+                return
+            fee = frappe.get_doc("Fees", fee_name, ignore_permissions=True)
+            fee.on_payment_authorized(
+                status="Completed",
+                payment_term=data.get("udf3"),
+                transaction_id=transaction_id,
+                amount=data.get("amount"),
+            )
             return {"message": "Payment Successful"}
-            
-        except Exception as e:
-            frappe.log_error("Error in handle_response", frappe.get_traceback())
-            return {"message": "Payment processing failed"}
-        finally:
-            login_manager.logout()
+        if frappe.db.exists(payment_request_doctype, payment_request_docname):
+            frappe.msgprint("Payment Request exists")
+            payment_request = frappe.get_doc(
+                payment_request_doctype,
+                payment_request_docname,
+                ignore_permissions=True,
+            )
+            frappe.db.set_value(
+                payment_request_doctype,
+                payment_request_docname,
+                "transaction_id",
+                transaction_id,
+            )
+            payment_request.on_payment_authorized(status="Completed")
+            return {"message": "Payment Successful"}
+        frappe.msgprint("Payment Request does not exist, Invalid Request")
 
     def handle_response_web_form(self, data):
         doctype = data.get("udf1")
@@ -310,54 +365,135 @@ class EasebuzzSettings(Document):
         return response
 
 
-    def generate_payment_url(self, **kwargs):
-        try:
-            # Initialize the Easebuzz client
-            salt = self.get_password(fieldname="salt", raise_exception=False)
-            self.client = Easebuzz(self.merchant_key, salt, self.env)
-            # Validate the student and retrieve necessary details
-            student = frappe.get_doc("Student", kwargs.get("student"))
-            site_url = frappe.utils.get_url()
-            amount = flt(kwargs.get("amount", 0))
-            transaction_id = frappe.generate_hash(length=40)
-            fee_hash = kwargs.get("fee_hash", "")
-            email = student.student_email_id
-            payment_plan = kwargs.get("payment_plan", "")
-            reference_name = kwargs.get("reference_docname", "")
-            first_name = self.process_name(student.first_name)
-            # Prepare the post data for payment initiation
-            post_data = {
-                "txnid": transaction_id,
-                "firstname": first_name,
-                "phone": student.student_mobile_number or "9999999999",
-                "email": email,
-                "city": student.city or "",
-                "zipcode": student.pincode or "",
-                "address1": student.address_line_1 or "",
-                "address2": student.address_line_2 or "",
-                "state": student.state or "",
-                "country": student.country or "",
-                "amount": str(amount),
-                "productinfo": f"Payment Request for {first_name}",
-                "surl": kwargs.get("success_url") or f"{site_url}/easebuzz/success",
-                "furl": kwargs.get("failure_url") or f"{site_url}/easebuzz/failure",
-                "show_payment_mode": get_payment_mode(kwargs.get("payment_method")),
-                "udf1": kwargs.get("reference_doctype", ""),
-                "udf2": self.format_data(reference_name),
-                "udf3": kwargs.get("payment_term", ""),
-                "udf4": self.format_data(payment_plan),
-                "udf5": fee_hash,
+@frappe.whitelist()
+def get_known_transaction_types():
+    """Transaction types Easebuzz reports, for seeding the rules table."""
+    return list(EASEBUZZ_TRANSACTION_TYPES)
+
+
+@frappe.whitelist()
+def get_charge_account_status():
+    """Report where each settling company's Easebuzz charges would be debited.
+
+    A company settles through Easebuzz when it has a PG suspense account, so
+    that is what defines "participating" -- the reconciliation never touches a
+    company without one.  For each, report the account that
+    ``resolve_charges_account`` would pick and, when there is none, the existing
+    account that looks like the right one so the user links it instead of
+    creating a second charges GL.
+    """
+    settings_rows = {}
+    for name in frappe.get_all("Easebuzz Settings", pluck="name"):
+        for row in frappe.get_all(
+            "Easebuzz Company Charge Account",
+            filters={"parent": name, "parenttype": "Easebuzz Settings"},
+            fields=["company", "charges_account"],
+        ):
+            settings_rows.setdefault(row.company, row.charges_account)
+
+    companies = frappe.get_all(
+        "Company",
+        filters={"default_easebuzz_account": ("is", "set")},
+        fields=["name", "abbr", "custom_easebuzz_charges"],
+        order_by="name",
+    )
+
+    status = []
+    for company in companies:
+        account = company.custom_easebuzz_charges
+        source = "Company" if account else None
+        if not account:
+            account = settings_rows.get(company.name)
+            source = "Easebuzz Settings" if account else None
+
+        status.append(
+            {
+                "company": company.name,
+                "account": account,
+                "source": source,
+                "suggested_account_name": DEFAULT_CHARGE_ACCOUNT_NAME,
+                "suggested_parent": account or find_expense_parent(company.name),
+                "candidates": [] if account else find_charge_account_candidates(company.name),
             }
-            # Process split payments if provided
-            split_payments = kwargs.get("split_payments")
-            if split_payments:
-                post_data["split_payments"] = split_payments
+        )
+    return status
 
-            return self.client.initiatePaymentAPI(post_data)
 
-        except Exception:
-            frappe.log_error("Error in generate_payment_url", frappe.get_traceback())
-            return None
+def find_charge_account_candidates(company):
+    """Ledger expense accounts of this company that already look like the one."""
+    return frappe.get_all(
+        "Account",
+        filters={
+            "company": company,
+            "is_group": 0,
+            "root_type": "Expense",
+            "account_name": ("like", "%Easebuzz%"),
+        },
+        pluck="name",
+        order_by="name",
+    )
+
+
+def find_expense_parent(company):
+    """The group account a new Easebuzz charges ledger should sit under."""
+    for account_name in ("Indirect Expenses", "Expenses"):
+        parent = frappe.db.get_value(
+            "Account",
+            {"company": company, "account_name": account_name, "is_group": 1},
+            "name",
+        )
+        if parent:
+            return parent
+
+    return frappe.db.get_value(
+        "Account",
+        {"company": company, "root_type": "Expense", "is_group": 1, "parent_account": ("is", "not set")},
+        "name",
+    )
+
+
+@frappe.whitelist()
+def create_charge_account(company, account_name=None, parent_account=None):
+    """Create the Easebuzz charges ledger for a company, or return the existing one.
+
+    Called from the settings form when a company has no charges account, so the
+    settlement does not have to be re-run against a half-configured chart of
+    accounts.  Never creates a second ledger with the same name.
+    """
+    frappe.has_permission("Account", "create", throw=True)
+
+    account_name = (account_name or DEFAULT_CHARGE_ACCOUNT_NAME).strip()
+    existing = frappe.db.get_value(
+        "Account",
+        {"company": company, "account_name": account_name, "is_group": 0},
+        "name",
+    )
+    if existing:
+        return {"account": existing, "created": False}
+
+    parent_account = parent_account or find_expense_parent(company)
+    if not parent_account:
+        frappe.throw(
+            frappe._(
+                "{0} has no expense group account to create {1} under. "
+                "Create the account manually and select it here."
+            ).format(company, account_name)
+        )
+
+    account = frappe.get_doc(
+        {
+            "doctype": "Account",
+            "account_name": account_name,
+            "company": company,
+            "parent_account": parent_account,
+            "root_type": "Expense",
+            "report_type": "Profit and Loss",
+            "is_group": 0,
+        }
+    ).insert()
+
+    return {"account": account.name, "created": True}
+
 
 @frappe.whitelist(allow_guest=True)
 def get_merchant_key():
@@ -378,8 +514,6 @@ def get_split_payment(fees, term=None):
 
 
 def get_payment_mode(method):
-    if not method:
-        return ""
     payment_methods = {
         "net banking": "NB",
         "credit card": "CC",
@@ -387,7 +521,7 @@ def get_payment_mode(method):
         "mobile wallet": "MW",
         "upi": "UPI",
     }
-    return payment_methods.get(method.lower()) or ""
+    return payment_methods.get(method.lower())
 
 
 def get_surchage():
