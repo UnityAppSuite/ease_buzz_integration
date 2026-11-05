@@ -5,7 +5,7 @@ import json
 import frappe
 from frappe.model.document import Document
 from easebuzz.easebuzz.utils.easebuzz_payment_gateway import Easebuzz
-from frappe.utils import call_hook_method
+from frappe.utils import call_hook_method, validate_email_address
 from frappe.utils.data import cint, flt
 from payments.utils.utils import create_payment_gateway
 
@@ -359,7 +359,11 @@ class EasebuzzSettings(Document):
             amount = flt(kwargs.get("amount", 0))
             transaction_id = frappe.generate_hash(length=40)
             fee_hash = kwargs.get("fee_hash", "")
-            email = student.student_email_id
+            email = (kwargs.get("payer_email") or student.student_email_id or "").strip()
+            if not email:
+                frappe.throw("A student email address is required to start an Easebuzz payment.")
+            if not validate_email_address(email) or "," in email:
+                frappe.throw("A valid email address is required to start an Easebuzz payment.")
             payment_plan = kwargs.get("payment_plan", "")
             reference_name = kwargs.get("reference_docname", "")
             first_name = self.process_name(student.first_name)
@@ -402,6 +406,8 @@ class EasebuzzSettings(Document):
 
             return self.client.initiatePaymentAPI(post_data)
 
+        except frappe.ValidationError:
+            raise
         except Exception:
             frappe.log_error("Error in generate_payment_url", frappe.get_traceback())
             return None
