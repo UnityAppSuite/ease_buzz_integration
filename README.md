@@ -14,6 +14,8 @@ Two opt-in safety checks for Easebuzz **Fees** callbacks (`EasebuzzSettings.hand
 
 Code: `easebuzz/easebuzz/utils/payment_safety.py`; tests: `easebuzz/easebuzz/utils/test_payment_safety.py`.
 
+Fee checkout needs one valid student email address or an explicit payer email. A missing or invalid address now returns a clear error before contacting Easebuzz. This does not supply a default recipient or change the gateway environment.
+
 ### Not verified
 
 - No live Easebuzz callback has been tested; the tests build hashes with the documented sequence and a made-up salt.
