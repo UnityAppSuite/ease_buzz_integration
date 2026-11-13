@@ -6,6 +6,9 @@ from easebuzz.easebuzz.utils.webhook import add_webhook_log
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 def webhook_handler(**kwargs):
+    if frappe.flags.read_only:
+        frappe.throw("Site is in read only mode for maintenance, try again later", frappe.InReadOnlyMode)
+
     try:
         data = frappe.parse_json(kwargs)
 
