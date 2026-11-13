@@ -3,7 +3,9 @@
 
 import json
 import frappe
+from frappe import _
 from frappe.model.document import Document
+from easebuzz.easebuzz.utils import payment as easebuzz_payment
 from easebuzz.easebuzz.utils.easebuzz_payment_gateway import Easebuzz
 from frappe.utils import call_hook_method
 from frappe.utils.data import cint, flt
@@ -310,7 +312,60 @@ class EasebuzzSettings(Document):
 
         return settings
 
-    def handle_response(self, data):
+    def validate_gateway_response(self, data):
+        """Return the callback payload only when Easebuzz's reverse hash matches.
+
+        Every field that decides what gets marked paid (udf1, udf2, status, amount, txnid)
+        is inside the hash, so nothing below may act on the payload before this check.
+        """
+        salt = self.get_password(fieldname="salt", raise_exception=False)
+        if not salt or not data or not data.get("hash"):
+            frappe.throw(_("Invalid Easebuzz callback"), frappe.AuthenticationError)
+        response = easebuzz_payment.easebuzzResponse(data, salt)
+        if response.get("status") != 1 or not isinstance(response.get("data"), dict):
+            frappe.throw(_("Invalid Easebuzz callback"), frappe.AuthenticationError)
+        if (response["data"].get("key") or "") != (self.merchant_key or ""):
+            frappe.throw(_("Invalid Easebuzz callback"), frappe.AuthenticationError)
+        return response["data"]
+
+    def _reject_replay(self, doctype, docname, transaction_id):
+        """True when this exact transaction was already recorded on the document.
+
+        A different transaction id on an already-paid document is refused rather than
+        overwritten, so a second genuine payment cannot silently replace the first.
+        """
+        if not frappe.get_meta(doctype).has_field("transaction_id"):
+            return False
+        existing = frappe.db.get_value(doctype, docname, "transaction_id")
+        if not existing:
+            return False
+        if existing == transaction_id:
+            return True
+        frappe.throw(_("Conflicting transaction callback received"))
+
+    def _validate_fee_amount(self, fee, payment_term, amount):
+        """Refuse a signed callback whose paid amount is less than what the term owes.
+
+        The expected figure is the one the payment page itself offers for this term
+        (``get_first_unpaid_term_data``), so legitimate payments match by construction.
+        A larger amount is allowed: card surcharges are added at the gateway.
+        """
+        if not hasattr(fee, "get_payment_details"):
+            return
+        details = fee.get_payment_details() or {}
+        if details.get("payment_term") != payment_term:
+            return
+        expected = flt(details.get("amount"), 2)
+        if expected and flt(amount, 2) + 0.01 < expected:
+            frappe.throw(
+                _("Easebuzz paid {0} for {1} {2}, but {3} is due").format(
+                    flt(amount, 2), fee.name, payment_term, expected
+                )
+            )
+
+    def handle_response(self, data, verified_payload=False):
+        if not verified_payload:
+            data = self.validate_gateway_response(data)
         payment_request_doctype = data.get("udf1")
         payment_request_docname = data.get("udf2")
         status = data.get("status")
@@ -320,9 +375,9 @@ class EasebuzzSettings(Document):
         if payment_request_doctype == "Fees":
             fee_name = self.format_data(payment_request_docname, reverse=True)
             if not frappe.db.exists("Fees", fee_name):
-                frappe.log_error(f"Fees {fee_name} does not exist")
-                return
+                frappe.throw(_("Fees {0} does not exist").format(fee_name))
             fee = frappe.get_doc("Fees", fee_name, ignore_permissions=True)
+            self._validate_fee_amount(fee, data.get("udf3"), data.get("amount"))
             fee.on_payment_authorized(
                 status="Completed",
                 payment_term=data.get("udf3"),
@@ -330,36 +385,42 @@ class EasebuzzSettings(Document):
                 amount=data.get("amount"),
             )
             return {"message": "Payment Successful"}
-        if frappe.db.exists(payment_request_doctype, payment_request_docname):
-            frappe.msgprint("Payment Request exists")
-            payment_request = frappe.get_doc(
-                payment_request_doctype,
-                payment_request_docname,
-                ignore_permissions=True,
-            )
-            frappe.db.set_value(
-                payment_request_doctype,
-                payment_request_docname,
-                "transaction_id",
-                transaction_id,
-            )
-            payment_request.on_payment_authorized(status="Completed")
-            return {"message": "Payment Successful"}
-        frappe.msgprint("Payment Request does not exist, Invalid Request")
+        if payment_request_doctype != "Payment Request":
+            frappe.throw(_("Unsupported Easebuzz callback reference"))
+        if not frappe.db.exists(payment_request_doctype, payment_request_docname):
+            frappe.throw(_("Payment Request does not exist, Invalid Request"))
+        if self._reject_replay(payment_request_doctype, payment_request_docname, transaction_id):
+            return {"message": "Duplicate callback ignored"}
+        payment_request = frappe.get_doc(
+            payment_request_doctype,
+            payment_request_docname,
+            ignore_permissions=True,
+        )
+        frappe.db.set_value(
+            payment_request_doctype,
+            payment_request_docname,
+            "transaction_id",
+            transaction_id,
+        )
+        payment_request.on_payment_authorized(status="Completed")
+        return {"message": "Payment Successful"}
 
-    def handle_response_web_form(self, data):
+    def handle_response_web_form(self, data, verified_payload=False):
+        if not verified_payload:
+            data = self.validate_gateway_response(data)
         doctype = data.get("udf1")
-        docname = data.get("udf2")
-        docname = docname.replace("@", "(").replace("#", ")")
+        docname = self.format_data(data.get("udf2"), reverse=True)
         status = data.get("status")
         transaction_id = data.get("txnid")
-        if status == "success":
-            if frappe.db.exists(doctype, docname):
-                frappe.db.set_value(doctype, docname, "transaction_id", transaction_id)
-                doc = frappe.get_doc(doctype, docname, ignore_permissions=True)
-                return doc.validate_payment(data)
-            else:
-                frappe.log_error(f"{doctype} {docname} does not exist")
+        if status != "success":
+            return
+        if not doctype or not frappe.db.exists(doctype, docname):
+            frappe.throw(_("{0} {1} does not exist").format(doctype, docname))
+        if self._reject_replay(doctype, docname, transaction_id):
+            return {"message": "Duplicate callback ignored"}
+        frappe.db.set_value(doctype, docname, "transaction_id", transaction_id)
+        doc = frappe.get_doc(doctype, docname, ignore_permissions=True)
+        return doc.validate_payment(data)
 
     def initiateRefund(self, data):
         amounts = float(data.get("amount"))
@@ -507,8 +568,10 @@ def create_charge_account(company, account_name=None, parent_account=None):
     return {"account": account.name, "created": True}
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 def get_merchant_key():
+    if frappe.session.user == "Guest":
+        frappe.throw(_("Authentication required"), frappe.PermissionError)
     controller = frappe.get_doc("Easebuzz Settings")
     return controller.merchant_key
 
