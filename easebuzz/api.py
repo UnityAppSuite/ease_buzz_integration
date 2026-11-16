@@ -1,16 +1,21 @@
 import frappe
 import requests
+from easebuzz.easebuzz.utils.callback import process_callback
 
-@frappe.whitelist(allow_guest=True)
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
 def webhook_handler(**kwargs):
     try:
         data = frappe.parse_json(kwargs)
-        controller = frappe.get_last_doc("Easebuzz Settings")
+        result = process_callback(data)
         if data.get("udf3") == "webform":
-            controller.handle_response_web_form(data)
-        else:
-            controller.handle_response(data)
-            url = "https://fees.walnutedu.in/index.php/payment/easebuzz_webhook_callback"
-            r = requests.post(url, json = data)
+            return result
+        # Forward only after the hash has been verified, so a forged payload never
+        # reaches the legacy fees system either.
+        url = "https://fees.walnutedu.in/index.php/payment/easebuzz_webhook_callback"
+        requests.post(url, json=data, timeout=(5, 30))
+        return {"message": "ok"}
     except Exception as e:
+        frappe.local.response["http_status_code"] = 400
         frappe.logger("easebuzz").exception(e)
+        return {"message": "invalid callback"}

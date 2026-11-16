@@ -1,22 +1,10 @@
 import frappe
+from easebuzz.easebuzz.utils.callback import process_callback
 
 
 def get_context(context):
     try:
-        if frappe.session.user == "Guest":
-            frappe.set_user("Administrator")
-            data = frappe.form_dict
-            handle_data(data)
-            frappe.set_user("Guest")
-        else:
-            handle_data(data)
+        process_callback(frappe.form_dict)
     except Exception as e:
+        frappe.local.response["http_status_code"] = 400
         frappe.logger("easebuzz").exception(e)
-
-
-def handle_data(data):
-    controller = frappe.get_last_doc("Easebuzz Settings")
-    if data.get("udf3") == "webform":
-        controller.handle_response_web_form(data)
-    else:
-        controller.handle_response(data)
