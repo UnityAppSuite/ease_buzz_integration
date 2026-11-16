@@ -1,9 +1,10 @@
 from hashlib import sha512
 
-import requests
 import json
 import re
 import traceback
+
+from .http import post_with_retries
 
 '''
 *
@@ -296,7 +297,7 @@ def _getDateTransaction(params_array, salt_key, url):
     params_array['hash'] = hash_key
 
     # requests call for retrive transaction based on date
-    request_result = requests.post(url + 'transaction/v1/retrieve/date', params_array)
+    request_result = post_with_retries(url + 'transaction/v1/retrieve/date', params_array)
     temp_result = json.loads(request_result.content)
 
     return temp_result
