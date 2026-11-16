@@ -129,6 +129,51 @@ class TestEasebuzzCallbackLookup(FrappeTestCase):
 			callback.get_settings_for_callback(callback_payload(key=""))
 
 
+class TestEasebuzzCallbackRouting(FrappeTestCase):
+	"""The handler must still pay genuine callbacks, and must pay nothing otherwise.
+
+	Without these, a refactor that reorders the branch guards (e.g. hoisting the
+	"not a Payment Request" rejection above the Fees branch) rejects every real fee
+	payment while the rest of this suite stays green.
+	"""
+
+	def handle(self, data, doc=None):
+		settings = settings_doc()  # built before frappe.get_doc is patched
+		with patch("frappe.db.exists", return_value=True), patch(
+			"frappe.get_doc", return_value=doc
+		) as get_doc, patch("frappe.db.set_value") as set_value:
+			result = EasebuzzSettings.handle_response(settings, data, verified_payload=True)
+		return result, get_doc, set_value
+
+	def test_signed_success_marks_the_fee_paid(self):
+		authorized = {}
+		fee = SimpleNamespace(
+			name="EDU-FEE-TEST-0001",
+			get_payment_details=lambda: {"payment_term": "Term 1", "amount": 100},
+			on_payment_authorized=lambda **kwargs: authorized.update(kwargs),
+		)
+		data = signed(callback_payload(udf1="Fees", udf3="Term 1", amount="100.0"))
+		result, _, _ = self.handle(data, doc=fee)
+		self.assertEqual(result, {"message": "Payment Successful"})
+		self.assertEqual(authorized["status"], "Completed")
+		self.assertEqual(authorized["payment_term"], "Term 1")
+		self.assertEqual(authorized["transaction_id"], data["txnid"])
+
+	def test_signed_failure_pays_nothing(self):
+		for doctype in ("Fees", "Payment Request"):
+			with self.subTest(doctype=doctype):
+				data = signed(callback_payload(status="failure", udf1=doctype))
+				result, get_doc, set_value = self.handle(data)
+				self.assertIsNone(result)
+				get_doc.assert_not_called()
+				set_value.assert_not_called()
+
+	def test_signed_callback_for_an_unsupported_doctype_is_refused(self):
+		data = signed(callback_payload(udf1="User", udf2="Administrator"))
+		with self.assertRaises(frappe.ValidationError):
+			self.handle(data)
+
+
 class TestEasebuzzHardening(FrappeTestCase):
 	def tearDown(self):
 		frappe.set_user("Administrator")
