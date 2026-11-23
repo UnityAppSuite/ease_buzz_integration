@@ -7,6 +7,8 @@ app_description = "EaseBuzz Integration"
 app_email = "easebuzz@hybrowlabs.com"
 app_license = "MIT"
 
+required_apps = ["erpnext", "edu_quality"]
+
 # Includes in <head>
 # ------------------
 
